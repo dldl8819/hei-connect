@@ -1,0 +1,1479 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+
+import '../../core/safety/cue_speaker.dart';
+import '../../core/safety/screen_awake.dart';
+import '../../core/safety/voice_cues.dart';
+import 'live_chat_panel.dart';
+import 'live_session_api.dart';
+import 'live_models.dart';
+import 'live_signaling_models.dart';
+import 'live_webrtc_controller.dart';
+
+class LiveHostPage extends StatefulWidget {
+  const LiveHostPage({super.key});
+
+  @override
+  State<LiveHostPage> createState() => _LiveHostPageState();
+}
+
+class _LiveHostPageState extends State<LiveHostPage> {
+  final LiveSessionApi _api = LiveSessionApi();
+  final TextEditingController _channelTitleController = TextEditingController();
+  final CueSpeaker _cueSpeaker = CueSpeaker();
+  final ScreenAwake _screenAwake = ScreenAwake();
+  late final LiveWebRtcController _webRtc;
+  Timer? _cuePollTimer;
+
+  bool _isLive = false;
+  bool _isCreating = false;
+  bool _isRefreshingSignal = false;
+  bool _isStartingMedia = false;
+  bool _supportEnabled = false;
+  bool _hasReportedConnectionLoss = false;
+  bool _requiresResumeConfirmation = false;
+  String? _errorMessage;
+  Channel? _channel;
+  LiveSession? _session;
+  SignalState? _signalState;
+  final Set<_PreRunChecklistItem> _confirmedPreRunItems =
+      <_PreRunChecklistItem>{};
+  List<GuidanceCueEvent> _recentCueEvents = const [];
+  int _lastCueSequence = 0;
+  VoiceCue _lastCue = VoiceCue.stopNow;
+  LiveSessionPurpose _purpose = LiveSessionPurpose.dailyHelp;
+  LiveSourceMode _sourceMode = LiveSourceMode.worldCamera;
+  RunnerVisionMode _runnerVisionMode = RunnerVisionMode.blind;
+
+  @override
+  void initState() {
+    super.initState();
+    _webRtc = LiveWebRtcController(api: _api);
+    _webRtc.addListener(_handleWebRtcChanged);
+    unawaited(_cueSpeaker.initialize());
+  }
+
+  @override
+  void dispose() {
+    _channelTitleController.dispose();
+    _stopCuePolling();
+    unawaited(_cueSpeaker.stop());
+    unawaited(_screenAwake.allowSleep());
+    _webRtc.removeListener(_handleWebRtcChanged);
+    _webRtc.dispose();
+    _api.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('라이브 열기')),
+      body: SafeArea(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onLongPress: _session == null
+              ? null
+              : () {
+                  unawaited(_requestEmergencyStop());
+                },
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              AnimatedBuilder(
+                animation: _webRtc,
+                builder: (context, _) {
+                  return _CameraPreviewPlaceholder(
+                    isLive: _isLive,
+                    sourceMode: _sourceMode,
+                    controller: _webRtc,
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              _PurposeSelector(
+                selectedPurpose: _purpose,
+                enabled: _session == null && !_isCreating,
+                onSelected: (purpose) {
+                  setState(() {
+                    _purpose = purpose;
+                    _confirmedPreRunItems.clear();
+                    if (purpose == LiveSessionPurpose.runningGuide) {
+                      _sourceMode = LiveSourceMode.worldCamera;
+                    }
+                  });
+                },
+              ),
+              if (_showsPreRunChecklist) ...[
+                const SizedBox(height: 16),
+                _RunnerVisionModeSelector(
+                  selectedMode: _runnerVisionMode,
+                  enabled: _session == null && !_isCreating,
+                  onSelected: (mode) {
+                    setState(() {
+                      _runnerVisionMode = mode;
+                      _confirmedPreRunItems.clear();
+                    });
+                  },
+                ),
+              ],
+              const SizedBox(height: 16),
+              _SourceModeSelector(
+                selectedSourceMode: _sourceMode,
+                enabled: _session == null && !_isCreating,
+                onSelected: (sourceMode) {
+                  setState(() {
+                    _sourceMode = sourceMode;
+                    if (_purpose == LiveSessionPurpose.runningGuide) {
+                      _confirmedPreRunItems.clear();
+                    }
+                  });
+                },
+              ),
+              if (_showsPreRunChecklist) ...[
+                const SizedBox(height: 16),
+                _PreRunChecklistPanel(
+                  runnerVisionMode: _runnerVisionMode,
+                  sourceMode: _sourceMode,
+                  confirmedItems: _confirmedPreRunItems,
+                  enabled: !_isLive && !_isCreating && !_isStartingMedia,
+                  onChanged: _setPreRunChecklistItem,
+                ),
+              ],
+              const SizedBox(height: 16),
+              _ChannelPanel(
+                controller: _channelTitleController,
+                channel: _channel,
+                supportEnabled: _supportEnabled,
+                enabled: _channel == null && _session == null && !_isCreating,
+                onSupportEnabledChanged: (value) {
+                  setState(() => _supportEnabled = value);
+                },
+                onCreateChannel: _createChannel,
+              ),
+              const SizedBox(height: 16),
+              AnimatedBuilder(
+                animation: _webRtc,
+                builder: (context, _) => _StatusPanel(
+                  lastCue: _lastCue,
+                  channel: _channel,
+                  session: _session,
+                  runnerVisionMode: _runnerVisionMode,
+                  signalState: _webRtc.signalState ?? _signalState,
+                  errorMessage: _errorMessage ?? _webRtc.errorMessage,
+                  requiresResumeConfirmation: _requiresResumeConfirmation,
+                  recentCueEvents: _recentCueEvents,
+                ),
+              ),
+              if (_session != null) ...[
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: _isRefreshingSignal ? null : _refreshSignalState,
+                  child: Text(_isRefreshingSignal ? '신호 확인 중' : '신호 새로고침'),
+                ),
+                const SizedBox(height: 8),
+                AnimatedBuilder(
+                  animation: _webRtc,
+                  builder: (context, _) => _WebRtcStatus(controller: _webRtc),
+                ),
+                const SizedBox(height: 8),
+                LiveChatPanel(
+                  api: _api,
+                  session: _session!,
+                  senderRole: ChatSenderRole.host,
+                  onNewMessages: _speakGuideChatMessages,
+                ),
+              ],
+              const SizedBox(height: 24),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(64),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: _isCreating || _isStartingMedia
+                    ? null
+                    : _handlePrimaryAction,
+                child: Text(_primaryButtonLabel),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(64),
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                  side: BorderSide(color: Theme.of(context).colorScheme.error),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: () async {
+                  await _requestEmergencyStop();
+                },
+                child: const Text('비상 정지 요청'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String get _primaryButtonLabel {
+    if (_isCreating) {
+      return '생성 중';
+    }
+
+    if (_isStartingMedia) {
+      return '연결 준비 중';
+    }
+
+    if (_session == null) {
+      return '라이브 세션 생성';
+    }
+
+    if (_requiresResumeConfirmation) {
+      return '안전 확인 후 재개';
+    }
+
+    return _isLive ? '일시정지' : '라이브 시작';
+  }
+
+  bool get _showsPreRunChecklist {
+    return _purpose == LiveSessionPurpose.runningGuide ||
+        _session?.purpose == LiveSessionPurpose.runningGuide;
+  }
+
+  bool get _isPreRunChecklistComplete {
+    return _sourceMode == LiveSourceMode.worldCamera &&
+        _confirmedPreRunItems.length == _PreRunChecklistItem.values.length;
+  }
+
+  void _setPreRunChecklistItem(_PreRunChecklistItem item, bool checked) {
+    setState(() {
+      if (checked) {
+        _confirmedPreRunItems.add(item);
+      } else {
+        _confirmedPreRunItems.remove(item);
+      }
+    });
+  }
+
+  Future<void> _createChannel() async {
+    final title = _channelTitleController.text.trim();
+    if (title.isEmpty) {
+      setState(() => _errorMessage = '채널 이름을 입력해 주세요.');
+      return;
+    }
+
+    setState(() {
+      _isCreating = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final channel = await _api.createChannel(
+        title: title,
+        supportEnabled: _supportEnabled,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _channel = channel);
+    } on LiveSessionApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _errorMessage = error.message);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _errorMessage = '채널 응답을 처리하지 못했습니다.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isCreating = false);
+      }
+    }
+  }
+
+  Future<void> _handlePrimaryAction() async {
+    if (_session == null) {
+      await _createSession();
+      return;
+    }
+
+    final session = _session!;
+    if (_requiresResumeConfirmation) {
+      final canResume = await _prepareResumeIfNeeded(session);
+      if (!canResume) {
+        return;
+      }
+
+      if (_isLive) {
+        await _markLiveAfterResume(session);
+        return;
+      }
+    }
+
+    if (_isLive) {
+      await _stopBroadcast();
+      return;
+    }
+
+    await _startBroadcast();
+  }
+
+  Future<void> _createSession() async {
+    setState(() {
+      _isCreating = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final session = await _api.createLiveSession(
+        purpose: _purpose,
+        sourceMode: _sourceMode,
+        runnerVisionMode: _purpose == LiveSessionPurpose.runningGuide
+            ? _runnerVisionMode
+            : null,
+        channelId: _channel?.channelId,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _session = session;
+        _signalState = null;
+        _hasReportedConnectionLoss = false;
+        _requiresResumeConfirmation = false;
+        _recentCueEvents = const [];
+        _lastCueSequence = 0;
+        _lastCue = VoiceCue.holdPace;
+      });
+      _startCuePolling(session);
+    } on LiveSessionApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _errorMessage = error.message);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _errorMessage = '응답을 처리하지 못했습니다. 앱과 서버 버전을 확인해 주세요.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isCreating = false);
+      }
+    }
+  }
+
+  Future<void> _refreshSignalState() async {
+    final session = _session;
+    if (session == null) {
+      return;
+    }
+
+    setState(() {
+      _isRefreshingSignal = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _webRtc.refreshHostSignal(session);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _signalState = _webRtc.signalState);
+    } on LiveSessionApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _errorMessage = error.message);
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshingSignal = false);
+      }
+    }
+  }
+
+  Future<void> _startBroadcast() async {
+    final session = _session;
+    if (session == null) {
+      return;
+    }
+
+    final canStart = await _preparePreRunIfNeeded(session);
+    if (!canStart) {
+      return;
+    }
+
+    setState(() {
+      _isStartingMedia = true;
+      _errorMessage = null;
+      _hasReportedConnectionLoss = false;
+    });
+
+    await _screenAwake.keepAwake();
+    await _webRtc.startHost(session);
+    if (!mounted) {
+      return;
+    }
+
+    final requiresResumeConfirmation =
+        session.purpose == LiveSessionPurpose.runningGuide &&
+            (_webRtc.safetyStopRequired ||
+                _webRtc.phase == WebRtcPhase.connectionLost);
+    final isLive = _webRtc.phase != WebRtcPhase.failed &&
+        _webRtc.phase != WebRtcPhase.connectionLost &&
+        _webRtc.phase != WebRtcPhase.closed;
+    LiveSession updatedSession = session;
+    String? statusError;
+    if (isLive) {
+      try {
+        updatedSession = await _api.updateSessionStatus(
+          sessionId: session.sessionId,
+          status: LiveSessionStatus.live,
+          reason: 'host_started',
+        );
+      } on LiveSessionApiException catch (error) {
+        statusError = error.message;
+      }
+    } else {
+      unawaited(_screenAwake.allowSleep());
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _session = updatedSession;
+      _isStartingMedia = false;
+      _isLive = isLive;
+      _signalState = _webRtc.signalState;
+      _errorMessage = statusError ?? _webRtc.errorMessage;
+      _requiresResumeConfirmation = requiresResumeConfirmation;
+      _lastCue = _isLive && !requiresResumeConfirmation
+          ? VoiceCue.holdPace
+          : VoiceCue.stopNow;
+    });
+  }
+
+  Future<bool> _preparePreRunIfNeeded(LiveSession session) async {
+    if (session.purpose != LiveSessionPurpose.runningGuide) {
+      return true;
+    }
+
+    if (_isPreRunChecklistComplete) {
+      return true;
+    }
+
+    setState(() {
+      _lastCue = VoiceCue.stopNow;
+      _errorMessage = _sourceMode == LiveSourceMode.worldCamera
+          ? '러닝 가이드 시작 전 안전 체크를 모두 완료해 주세요.'
+          : '러닝 가이드는 눈앞 카메라 모드가 필요합니다.';
+    });
+    unawaited(_cueSpeaker.speak(VoiceCue.stopNow));
+
+    try {
+      await _api.updateSafetyState(
+        sessionId: session.sessionId,
+        safetyState: SafetyState.checkRequired,
+        reason: 'pre_run_check_required',
+      );
+    } on LiveSessionApiException catch (error) {
+      if (mounted) {
+        setState(() => _errorMessage = error.message);
+      }
+    }
+
+    return false;
+  }
+
+  void _startCuePolling(LiveSession session) {
+    _stopCuePolling();
+    unawaited(_pollGuidanceCues(session));
+    _cuePollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(_pollGuidanceCues(session));
+    });
+  }
+
+  void _stopCuePolling() {
+    _cuePollTimer?.cancel();
+    _cuePollTimer = null;
+  }
+
+  Future<void> _pollGuidanceCues(LiveSession session) async {
+    if (!mounted) {
+      return;
+    }
+
+    try {
+      final events = await _api.listGuidanceCues(session.sessionId);
+      final unseenEvents =
+          events.where((event) => event.sequence > _lastCueSequence).toList();
+      if (unseenEvents.isEmpty || !mounted) {
+        return;
+      }
+
+      final latest = unseenEvents.last;
+      final recentEvents =
+          events.length <= 5 ? events : events.sublist(events.length - 5);
+      setState(() {
+        _lastCueSequence = latest.sequence;
+        _lastCue = latest.cue;
+        _recentCueEvents = recentEvents;
+      });
+      unawaited(_cueSpeaker.speak(latest.cue));
+    } on LiveSessionApiException catch (error) {
+      if (mounted) {
+        setState(() => _errorMessage = error.message);
+      }
+    }
+  }
+
+  void _speakGuideChatMessages(List<LiveChatMessage> messages) {
+    unawaited(_speakGuideChatMessagesInOrder(messages));
+  }
+
+  Future<void> _speakGuideChatMessagesInOrder(
+    List<LiveChatMessage> messages,
+  ) async {
+    final speakableMessages = messages.where(
+      (message) =>
+          message.senderRole == ChatSenderRole.supporter ||
+          message.senderRole == ChatSenderRole.system,
+    );
+
+    for (final message in speakableMessages) {
+      final prefix = message.senderRole == ChatSenderRole.supporter
+          ? '가이드 메시지'
+          : '시스템 메시지';
+      final body = message.body.trim();
+      if (body.isEmpty) {
+        continue;
+      }
+
+      await _cueSpeaker.speakText('$prefix. $body');
+    }
+  }
+
+  List<GuidanceCueEvent> _takeRecentCueEvents(
+    List<GuidanceCueEvent> events,
+  ) {
+    if (events.length <= 5) {
+      return List<GuidanceCueEvent>.unmodifiable(events);
+    }
+
+    return List<GuidanceCueEvent>.unmodifiable(
+      events.sublist(events.length - 5),
+    );
+  }
+
+  Future<void> _requestEmergencyStop() async {
+    final session = _session;
+    setState(() {
+      _lastCue = VoiceCue.stopNow;
+      _requiresResumeConfirmation =
+          session?.purpose == LiveSessionPurpose.runningGuide;
+      _errorMessage = null;
+    });
+    unawaited(_cueSpeaker.speak(VoiceCue.stopNow));
+
+    if (session == null) {
+      return;
+    }
+
+    LiveSession? updatedSession;
+    GuidanceCueEvent? stopCue;
+    String? stopError;
+    try {
+      await _api.updateSafetyState(
+        sessionId: session.sessionId,
+        safetyState: SafetyState.stopNow,
+        reason: 'runner_emergency_stop',
+      );
+      stopCue = await _api.createGuidanceCue(
+        sessionId: session.sessionId,
+        cue: VoiceCue.stopNow,
+        senderRole: CueSenderRole.system,
+      );
+      updatedSession = await _api.updateSessionStatus(
+        sessionId: session.sessionId,
+        status: LiveSessionStatus.paused,
+        reason: 'runner_emergency_stop',
+      );
+    } on LiveSessionApiException catch (error) {
+      stopError = error.message;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (updatedSession != null) {
+        _session = updatedSession;
+      }
+      if (stopCue != null) {
+        _recentCueEvents = _takeRecentCueEvents([
+          ..._recentCueEvents,
+          stopCue,
+        ]);
+        _lastCueSequence = stopCue.sequence;
+      }
+      _lastCue = VoiceCue.stopNow;
+      _requiresResumeConfirmation =
+          session.purpose == LiveSessionPurpose.runningGuide;
+      _errorMessage = stopError;
+    });
+  }
+
+  Future<void> _stopBroadcast() async {
+    final session = _session;
+    await _webRtc.stop();
+    await _screenAwake.allowSleep();
+    if (!mounted) {
+      return;
+    }
+
+    LiveSession? updatedSession;
+    String? statusError;
+    if (session != null) {
+      try {
+        updatedSession = await _api.updateSessionStatus(
+          sessionId: session.sessionId,
+          status: LiveSessionStatus.paused,
+          reason: 'host_paused',
+        );
+      } on LiveSessionApiException catch (error) {
+        statusError = error.message;
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (updatedSession != null) {
+        _session = updatedSession;
+      }
+      _isLive = false;
+      _lastCue = VoiceCue.stopNow;
+      _requiresResumeConfirmation =
+          session?.purpose == LiveSessionPurpose.runningGuide;
+      _errorMessage = statusError ?? _webRtc.errorMessage;
+    });
+    unawaited(_cueSpeaker.speak(VoiceCue.stopNow));
+  }
+
+  void _handleWebRtcChanged() {
+    if (!mounted) {
+      return;
+    }
+
+    final session = _session;
+    if (session == null) {
+      return;
+    }
+
+    final requiresStop = _webRtc.safetyStopRequired ||
+        _webRtc.phase == WebRtcPhase.connectionLost;
+    final requiresResumeConfirmation = _requiresResumeConfirmation ||
+        (session.purpose == LiveSessionPurpose.runningGuide && requiresStop);
+    final connectionEnded = requiresStop ||
+        _webRtc.phase == WebRtcPhase.failed ||
+        _webRtc.phase == WebRtcPhase.closed;
+
+    if (requiresStop && !_hasReportedConnectionLoss) {
+      _hasReportedConnectionLoss = true;
+      unawaited(_reportConnectionLost(session));
+    }
+
+    if (!connectionEnded) {
+      return;
+    }
+
+    final nextCue =
+        session.purpose == LiveSessionPurpose.runningGuide && requiresStop
+            ? VoiceCue.stopNow
+            : _lastCue;
+
+    if (!_isLive &&
+        _lastCue == nextCue &&
+        _errorMessage == _webRtc.errorMessage &&
+        _requiresResumeConfirmation == requiresResumeConfirmation) {
+      return;
+    }
+
+    setState(() {
+      _isLive = false;
+      _lastCue = nextCue;
+      _errorMessage = _webRtc.errorMessage;
+      _requiresResumeConfirmation = requiresResumeConfirmation;
+    });
+    if (nextCue == VoiceCue.stopNow) {
+      unawaited(_cueSpeaker.speak(VoiceCue.stopNow));
+    }
+  }
+
+  Future<bool> _prepareResumeIfNeeded(LiveSession session) async {
+    if (!_requiresResumeConfirmation) {
+      return true;
+    }
+
+    final confirmed = await _showResumeConfirmationDialog();
+    if (!confirmed) {
+      return false;
+    }
+
+    try {
+      await _api.updateSafetyState(
+        sessionId: session.sessionId,
+        safetyState: SafetyState.ready,
+        reason: 'resume_confirmed',
+      );
+    } on LiveSessionApiException catch (error) {
+      if (mounted) {
+        setState(() => _errorMessage = error.message);
+      }
+      return false;
+    }
+
+    if (!mounted) {
+      return false;
+    }
+
+    setState(() {
+      _requiresResumeConfirmation = false;
+      _lastCue = VoiceCue.holdPace;
+      _errorMessage = null;
+    });
+    return true;
+  }
+
+  Future<void> _markLiveAfterResume(LiveSession session) async {
+    try {
+      final updatedSession = await _api.updateSessionStatus(
+        sessionId: session.sessionId,
+        status: LiveSessionStatus.live,
+        reason: 'resume_confirmed',
+      );
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _session = updatedSession;
+        _lastCue = VoiceCue.holdPace;
+        _errorMessage = null;
+      });
+    } on LiveSessionApiException catch (error) {
+      if (mounted) {
+        setState(() => _errorMessage = error.message);
+      }
+    }
+  }
+
+  Future<bool> _showResumeConfirmationDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('안전 확인'),
+          content: const Text(
+            '러너가 멈췄고 카메라와 오디오가 안정적인 상태에서만 재개합니다.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('재개'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return result ?? false;
+  }
+
+  Future<void> _reportConnectionLost(LiveSession session) async {
+    try {
+      await _api.updateSafetyState(
+        sessionId: session.sessionId,
+        safetyState: SafetyState.connectionLost,
+        reason: 'webrtc_connection_lost',
+      );
+    } on LiveSessionApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _errorMessage = error.message);
+    }
+  }
+}
+
+class _PurposeSelector extends StatelessWidget {
+  const _PurposeSelector({
+    required this.selectedPurpose,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final LiveSessionPurpose selectedPurpose;
+  final bool enabled;
+  final ValueChanged<LiveSessionPurpose> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('방 종류', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final purpose in LiveSessionPurpose.values)
+                  ChoiceChip(
+                    label: Text(purpose.label),
+                    selected: purpose == selectedPurpose,
+                    onSelected: enabled ? (_) => onSelected(purpose) : null,
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RunnerVisionModeSelector extends StatelessWidget {
+  const _RunnerVisionModeSelector({
+    required this.selectedMode,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final RunnerVisionMode selectedMode;
+  final bool enabled;
+  final ValueChanged<RunnerVisionMode> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('러너 모드', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final mode in RunnerVisionMode.values)
+                  ChoiceChip(
+                    label: Text(mode.label),
+                    selected: mode == selectedMode,
+                    onSelected: enabled ? (_) => onSelected(mode) : null,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              selectedMode.guidanceLabel,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+extension _RunnerVisionModeGuidance on RunnerVisionMode {
+  String get guidanceLabel {
+    return switch (this) {
+      RunnerVisionMode.sighted => '화면 조작이 가능하지만 원격 가이드와 안전 체크를 유지합니다.',
+      RunnerVisionMode.lowVision => '큰 화면 요소와 음성 안내를 함께 사용합니다.',
+      RunnerVisionMode.blind => '화면 버튼에 의존하지 않고 길게 누르기와 음성 안내를 기본으로 사용합니다.',
+    };
+  }
+}
+
+class _SourceModeSelector extends StatelessWidget {
+  const _SourceModeSelector({
+    required this.selectedSourceMode,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final LiveSourceMode selectedSourceMode;
+  final bool enabled;
+  final ValueChanged<LiveSourceMode> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('방송 소스', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final sourceMode in LiveSourceMode.values)
+                  ChoiceChip(
+                    label: Text(sourceMode.label),
+                    selected: sourceMode == selectedSourceMode,
+                    onSelected: enabled ? (_) => onSelected(sourceMode) : null,
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChannelPanel extends StatelessWidget {
+  const _ChannelPanel({
+    required this.controller,
+    required this.channel,
+    required this.supportEnabled,
+    required this.enabled,
+    required this.onSupportEnabledChanged,
+    required this.onCreateChannel,
+  });
+
+  final TextEditingController controller;
+  final Channel? channel;
+  final bool supportEnabled;
+  final bool enabled;
+  final ValueChanged<bool> onSupportEnabledChanged;
+  final VoidCallback onCreateChannel;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('채널', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 10),
+            if (channel == null) ...[
+              TextField(
+                controller: controller,
+                enabled: enabled,
+                maxLength: 40,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  labelText: '채널 이름',
+                  counterText: '',
+                ),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('후원 받기'),
+                value: supportEnabled,
+                onChanged: enabled ? onSupportEnabledChanged : null,
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton(
+                onPressed: enabled ? onCreateChannel : null,
+                child: const Text('채널 만들기'),
+              ),
+            ] else ...[
+              Text(channel!.title),
+              const SizedBox(height: 4),
+              Text('채널 코드: ${channel!.channelCode}'),
+              const SizedBox(height: 4),
+              SelectableText('채널 링크: ${channel!.channelLink}'),
+              const SizedBox(height: 4),
+              Text(channel!.supportEnabled ? '후원 가능' : '후원 꺼짐'),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+enum _PreRunChecklistItem {
+  controlledRoute,
+  phoneMounted,
+  cameraAngle,
+  emergencyStopGesture,
+  audioReady,
+  guideVisibility,
+  networkBattery,
+  backupReady,
+}
+
+extension _PreRunChecklistItemLabel on _PreRunChecklistItem {
+  String get label {
+    return switch (this) {
+      _PreRunChecklistItem.controlledRoute => '통제되고 익숙한 경로입니다.',
+      _PreRunChecklistItem.phoneMounted => '휴대폰이 앞을 보도록 단단히 고정됐습니다.',
+      _PreRunChecklistItem.cameraAngle => '화면에 전방 주로와 발밑 가장자리가 함께 보입니다.',
+      _PreRunChecklistItem.emergencyStopGesture =>
+        '화면 아무 곳이나 길게 누르면 정지 요청이 됩니다.',
+      _PreRunChecklistItem.audioReady => '오픈이어 또는 이어폰 출력이 연결됐습니다.',
+      _PreRunChecklistItem.guideVisibility => '가이드가 바닥과 전방을 볼 수 있습니다.',
+      _PreRunChecklistItem.networkBattery => '네트워크와 배터리가 충분합니다.',
+      _PreRunChecklistItem.backupReady => '비상 정지와 백업 동행자를 확인했습니다.',
+    };
+  }
+}
+
+class _PreRunChecklistPanel extends StatelessWidget {
+  const _PreRunChecklistPanel({
+    required this.runnerVisionMode,
+    required this.sourceMode,
+    required this.confirmedItems,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final RunnerVisionMode runnerVisionMode;
+  final LiveSourceMode sourceMode;
+  final Set<_PreRunChecklistItem> confirmedItems;
+  final bool enabled;
+  final void Function(_PreRunChecklistItem item, bool checked) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final cameraReady = sourceMode == LiveSourceMode.worldCamera;
+    final allChecked =
+        confirmedItems.length == _PreRunChecklistItem.values.length;
+    final ready = cameraReady && allChecked;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: ready
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.outlineVariant,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('러닝 전 안전 체크', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text('러너 모드: ${runnerVisionMode.label}'),
+            const SizedBox(height: 8),
+            Text(
+              cameraReady ? '카메라: 눈앞 카메라' : '카메라: 눈앞 카메라로 변경 필요',
+              style: TextStyle(
+                color: cameraReady
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.error,
+              ),
+            ),
+            const SizedBox(height: 8),
+            for (final item in _PreRunChecklistItem.values)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(item.label),
+                value: confirmedItems.contains(item),
+                onChanged:
+                    enabled ? (value) => onChanged(item, value ?? false) : null,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CameraPreviewPlaceholder extends StatelessWidget {
+  const _CameraPreviewPlaceholder({
+    required this.isLive,
+    required this.sourceMode,
+    required this.controller,
+  });
+
+  final bool isLive;
+  final LiveSourceMode sourceMode;
+  final LiveWebRtcController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final stream = controller.localRenderer.srcObject;
+    if (stream != null && sourceMode != LiveSourceMode.audioOnly) {
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              RTCVideoView(
+                controller.localRenderer,
+                mirror: sourceMode == LiveSourceMode.selfieCamera,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+              ),
+              if (sourceMode == LiveSourceMode.worldCamera)
+                const _RunningCameraGuideOverlay(),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xFF111827),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: Text(
+            isLive && sourceMode == LiveSourceMode.audioOnly
+                ? '오디오 방송 중'
+                : isLive
+                    ? '라이브 송출 중'
+                    : '카메라 대기',
+            style: const TextStyle(color: Colors.white, fontSize: 18),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RunningCameraGuideOverlay extends StatelessWidget {
+  const _RunningCameraGuideOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    const lineColor = Color(0xE6FFFFFF);
+    const shadowColor = Color(0x99000000);
+
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: CustomPaint(painter: _RunningCameraGuidePainter()),
+          ),
+          const Positioned(
+            top: 10,
+            left: 12,
+            child: _OverlayLabel(
+              text: '전방',
+              lineColor: lineColor,
+              shadowColor: shadowColor,
+            ),
+          ),
+          const Positioned(
+            left: 12,
+            bottom: 12,
+            child: _OverlayLabel(
+              text: '발밑',
+              lineColor: lineColor,
+              shadowColor: shadowColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RunningCameraGuidePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.9)
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+
+    final centerX = size.width / 2;
+    final horizonY = size.height * 0.42;
+    final footY = size.height * 0.78;
+    canvas.drawLine(Offset(0, horizonY), Offset(size.width, horizonY), paint);
+    canvas.drawLine(Offset(0, footY), Offset(size.width, footY), paint);
+    canvas.drawLine(Offset(centerX, 0), Offset(centerX, size.height), paint);
+
+    final pathPaint = Paint()
+      ..color = const Color(0x660F766E)
+      ..style = PaintingStyle.fill;
+    final path = Path()
+      ..moveTo(size.width * 0.42, horizonY)
+      ..lineTo(size.width * 0.58, horizonY)
+      ..lineTo(size.width * 0.78, size.height)
+      ..lineTo(size.width * 0.22, size.height)
+      ..close();
+    canvas.drawPath(path, pathPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _OverlayLabel extends StatelessWidget {
+  const _OverlayLabel({
+    required this.text,
+    required this.lineColor,
+    required this.shadowColor,
+  });
+
+  final String text;
+  final Color lineColor;
+  final Color shadowColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: shadowColor,
+        border: Border.all(color: lineColor),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WebRtcStatus extends StatelessWidget {
+  const _WebRtcStatus({required this.controller});
+
+  final LiveWebRtcController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('WebRTC: ${controller.phase.label}'),
+            if (controller.errorMessage != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                controller.errorMessage!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusPanel extends StatelessWidget {
+  const _StatusPanel({
+    required this.lastCue,
+    required this.channel,
+    required this.session,
+    required this.runnerVisionMode,
+    required this.signalState,
+    required this.errorMessage,
+    required this.requiresResumeConfirmation,
+    required this.recentCueEvents,
+  });
+
+  final VoiceCue lastCue;
+  final Channel? channel;
+  final LiveSession? session;
+  final RunnerVisionMode runnerVisionMode;
+  final SignalState? signalState;
+  final String? errorMessage;
+  final bool requiresResumeConfirmation;
+  final List<GuidanceCueEvent> recentCueEvents;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('라이브 상태', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            if (session == null)
+              const Text('세션을 생성하면 참여 코드가 표시됩니다.')
+            else ...[
+              Text('참여 코드: ${session!.joinCode}'),
+              const SizedBox(height: 4),
+              SelectableText('참여 링크: ${session!.joinLink}'),
+              const SizedBox(height: 4),
+              Text('방 종류: ${session!.purpose.label}'),
+              const SizedBox(height: 4),
+              Text('방송 소스: ${session!.sourceMode.label}'),
+              if (session!.purpose == LiveSessionPurpose.runningGuide) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '러너 모드: ${(session!.runnerVisionMode ?? runnerVisionMode).label}',
+                ),
+              ],
+              const SizedBox(height: 4),
+              Text('서버 상태: ${_statusLabel(session!.status)}'),
+              if (channel != null) ...[
+                const SizedBox(height: 4),
+                Text('채널: ${channel!.title}'),
+              ],
+              const SizedBox(height: 4),
+              Text(_signalLabel(signalState)),
+              const SizedBox(height: 4),
+              Text(_iceLabel(signalState)),
+              const SizedBox(height: 12),
+            ],
+            Text(
+              lastCue.label,
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+            if (recentCueEvents.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text('최근 안내', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 6),
+              for (final event in recentCueEvents.reversed)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 44,
+                        child: Text('#${event.sequence}'),
+                      ),
+                      Expanded(child: Text(event.cue.label)),
+                      Text(_senderLabel(event.senderRole)),
+                    ],
+                  ),
+                ),
+            ],
+            if (requiresResumeConfirmation) ...[
+              const SizedBox(height: 8),
+              Text(
+                '재개 전 안전 확인 필요',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            if (errorMessage != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                errorMessage!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _signalLabel(SignalState? signalState) {
+    if (signalState == null) {
+      return '신호: 미확인';
+    }
+
+    final offer = signalState.hasOffer ? 'offer 있음' : 'offer 없음';
+    final answer = signalState.hasAnswer ? 'answer 있음' : 'answer 없음';
+    return '신호: $offer / $answer';
+  }
+
+  String _iceLabel(SignalState? signalState) {
+    if (signalState == null) {
+      return 'ICE: 미확인';
+    }
+
+    return 'ICE: 송출자 ${signalState.hostIceCandidates.length} / 참여자 ${signalState.supporterIceCandidates.length}';
+  }
+
+  String _senderLabel(CueSenderRole senderRole) {
+    return switch (senderRole) {
+      CueSenderRole.supporter => '가이드',
+      CueSenderRole.system => '시스템',
+    };
+  }
+
+  String _statusLabel(LiveSessionStatus status) {
+    return switch (status) {
+      LiveSessionStatus.waitingForSupporter => '참여 대기',
+      LiveSessionStatus.connected => '연결됨',
+      LiveSessionStatus.live => '라이브',
+      LiveSessionStatus.paused => '일시정지',
+      LiveSessionStatus.ended => '종료',
+    };
+  }
+}
