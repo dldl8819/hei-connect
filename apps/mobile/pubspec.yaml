@@ -13,6 +13,8 @@ dependencies:
   flutter_tts: ^4.2.5
   flutter_webrtc: ^1.4.1
   http: ^1.2.2
+  google_mlkit_object_detection: ^0.15.1
+  path_provider: ^2.1.5
 
 dependency_overrides:
   flutter_tts:

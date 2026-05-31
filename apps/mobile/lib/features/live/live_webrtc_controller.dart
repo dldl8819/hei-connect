@@ -200,6 +200,25 @@ class LiveWebRtcController extends ChangeNotifier {
     _setPhase(WebRtcPhase.closed);
   }
 
+  Future<Uint8List?> captureLocalVideoFrame() async {
+    final localStream = _localStream;
+    if (localStream == null) {
+      return null;
+    }
+
+    final videoTracks = localStream.getVideoTracks();
+    if (videoTracks.isEmpty) {
+      return null;
+    }
+
+    try {
+      final frame = await videoTracks.first.captureFrame();
+      return frame.asUint8List();
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;

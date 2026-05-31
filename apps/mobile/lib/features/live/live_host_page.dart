@@ -6,6 +6,8 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../../core/safety/cue_speaker.dart';
 import '../../core/safety/screen_awake.dart';
 import '../../core/safety/voice_cues.dart';
+import '../ai/ai_vision_assist_controller.dart';
+import '../ai/ai_vision_models.dart';
 import 'live_chat_panel.dart';
 import 'live_session_api.dart';
 import 'live_models.dart';
@@ -25,6 +27,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   final CueSpeaker _cueSpeaker = CueSpeaker();
   final ScreenAwake _screenAwake = ScreenAwake();
   late final LiveWebRtcController _webRtc;
+  late final AiVisionAssistController _aiAssist;
   Timer? _cuePollTimer;
 
   bool _isLive = false;
@@ -32,6 +35,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   bool _isRefreshingSignal = false;
   bool _isStartingMedia = false;
   bool _supportEnabled = false;
+  bool _aiAssistEnabled = false;
   bool _hasReportedConnectionLoss = false;
   bool _requiresResumeConfirmation = false;
   String? _errorMessage;
@@ -51,6 +55,10 @@ class _LiveHostPageState extends State<LiveHostPage> {
   void initState() {
     super.initState();
     _webRtc = LiveWebRtcController(api: _api);
+    _aiAssist = AiVisionAssistController(
+      captureFrame: _webRtc.captureLocalVideoFrame,
+      onDecision: _handleAiVisionDecision,
+    );
     _webRtc.addListener(_handleWebRtcChanged);
     unawaited(_cueSpeaker.initialize());
   }
@@ -61,6 +69,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
     _stopCuePolling();
     unawaited(_cueSpeaker.stop());
     unawaited(_screenAwake.allowSleep());
+    _aiAssist.dispose();
     _webRtc.removeListener(_handleWebRtcChanged);
     _webRtc.dispose();
     _api.close();
@@ -102,6 +111,9 @@ class _LiveHostPageState extends State<LiveHostPage> {
                     _confirmedPreRunItems.clear();
                     if (purpose == LiveSessionPurpose.runningGuide) {
                       _sourceMode = LiveSourceMode.worldCamera;
+                    } else {
+                      _aiAssistEnabled = false;
+                      _aiAssist.stop();
                     }
                   });
                 },
@@ -129,6 +141,10 @@ class _LiveHostPageState extends State<LiveHostPage> {
                     if (_purpose == LiveSessionPurpose.runningGuide) {
                       _confirmedPreRunItems.clear();
                     }
+                    if (sourceMode != LiveSourceMode.worldCamera) {
+                      _aiAssistEnabled = false;
+                      _aiAssist.stop();
+                    }
                   });
                 },
               ),
@@ -140,6 +156,26 @@ class _LiveHostPageState extends State<LiveHostPage> {
                   confirmedItems: _confirmedPreRunItems,
                   enabled: !_isLive && !_isCreating && !_isStartingMedia,
                   onChanged: _setPreRunChecklistItem,
+                ),
+              ],
+              if (_showsPreRunChecklist) ...[
+                const SizedBox(height: 16),
+                AnimatedBuilder(
+                  animation: _aiAssist,
+                  builder: (context, _) {
+                    return _AiVisionAssistPanel(
+                      enabled: _aiAssistEnabled,
+                      canUse: _canUseAiVisionAssist,
+                      isLive: _isLive,
+                      controller: _aiAssist,
+                      onEnabledChanged: _setAiAssistEnabled,
+                      onAnalyzeNow: _isLive && _aiAssistEnabled
+                          ? () {
+                              unawaited(_aiAssist.analyzeOnce());
+                            }
+                          : null,
+                    );
+                  },
                 ),
               ],
               const SizedBox(height: 16),
@@ -244,6 +280,13 @@ class _LiveHostPageState extends State<LiveHostPage> {
   bool get _showsPreRunChecklist {
     return _purpose == LiveSessionPurpose.runningGuide ||
         _session?.purpose == LiveSessionPurpose.runningGuide;
+  }
+
+  bool get _canUseAiVisionAssist {
+    final purpose = _session?.purpose ?? _purpose;
+    final sourceMode = _session?.sourceMode ?? _sourceMode;
+    return purpose == LiveSessionPurpose.runningGuide &&
+        sourceMode == LiveSourceMode.worldCamera;
   }
 
   bool get _isPreRunChecklistComplete {
@@ -473,6 +516,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
           ? VoiceCue.holdPace
           : VoiceCue.stopNow;
     });
+    _syncAiAssistWithLiveState();
   }
 
   Future<bool> _preparePreRunIfNeeded(LiveSession session) async {
@@ -587,8 +631,110 @@ class _LiveHostPageState extends State<LiveHostPage> {
     );
   }
 
+  void _setAiAssistEnabled(bool enabled) {
+    if (enabled && !_canUseAiVisionAssist) {
+      setState(() {
+        _aiAssistEnabled = false;
+        _errorMessage = 'AI 보조는 러닝 가이드의 전방 카메라 모드에서만 사용할 수 있습니다.';
+      });
+      _aiAssist.stop();
+      return;
+    }
+
+    setState(() {
+      _aiAssistEnabled = enabled;
+      _errorMessage = null;
+    });
+    _syncAiAssistWithLiveState();
+  }
+
+  void _syncAiAssistWithLiveState() {
+    if (_aiAssistEnabled &&
+        _isLive &&
+        _canUseAiVisionAssist &&
+        !_requiresResumeConfirmation) {
+      _aiAssist.start();
+      return;
+    }
+
+    _aiAssist.stop();
+  }
+
+  void _handleAiVisionDecision(AiHazardDecision decision) {
+    unawaited(_applyAiVisionDecision(decision));
+  }
+
+  Future<void> _applyAiVisionDecision(AiHazardDecision decision) async {
+    final session = _session;
+    if (session == null ||
+        !_aiAssistEnabled ||
+        !_isLive ||
+        session.purpose != LiveSessionPurpose.runningGuide ||
+        !decision.shouldSpeak) {
+      return;
+    }
+
+    unawaited(_cueSpeaker.speakText(decision.spokenText));
+
+    LiveSession? updatedSession;
+    GuidanceCueEvent? cueEvent;
+    String? aiError;
+    try {
+      if (decision.shouldPauseRunner) {
+        await _api.updateSafetyState(
+          sessionId: session.sessionId,
+          safetyState: SafetyState.stopNow,
+          reason: 'ai_vision_stop',
+        );
+      }
+
+      cueEvent = await _api.createGuidanceCue(
+        sessionId: session.sessionId,
+        cue: decision.cue,
+        senderRole: CueSenderRole.system,
+      );
+
+      if (decision.shouldPauseRunner) {
+        updatedSession = await _api.updateSessionStatus(
+          sessionId: session.sessionId,
+          status: LiveSessionStatus.paused,
+          reason: 'ai_vision_stop',
+        );
+      }
+    } on LiveSessionApiException catch (error) {
+      aiError = error.message;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (updatedSession != null) {
+        _session = updatedSession;
+      }
+      if (cueEvent != null) {
+        _recentCueEvents = _takeRecentCueEvents([
+          ..._recentCueEvents,
+          cueEvent,
+        ]);
+        _lastCueSequence = cueEvent.sequence;
+      }
+      _lastCue = decision.cue;
+      if (decision.shouldPauseRunner) {
+        _requiresResumeConfirmation = true;
+      }
+      _errorMessage = aiError;
+    });
+
+    if (decision.shouldPauseRunner) {
+      _aiAssist.stop();
+    }
+  }
+
   Future<void> _requestEmergencyStop() async {
     final session = _session;
+    _aiAssist.stop();
     setState(() {
       _lastCue = VoiceCue.stopNow;
       _requiresResumeConfirmation =
@@ -648,6 +794,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
 
   Future<void> _stopBroadcast() async {
     final session = _session;
+    _aiAssist.stop();
     await _webRtc.stop();
     await _screenAwake.allowSleep();
     if (!mounted) {
@@ -724,6 +871,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
       return;
     }
 
+    _aiAssist.stop();
     setState(() {
       _isLive = false;
       _lastCue = nextCue;
@@ -786,6 +934,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
         _lastCue = VoiceCue.holdPace;
         _errorMessage = null;
       });
+      _syncAiAssistWithLiveState();
     } on LiveSessionApiException catch (error) {
       if (mounted) {
         setState(() => _errorMessage = error.message);
@@ -833,6 +982,110 @@ class _LiveHostPageState extends State<LiveHostPage> {
 
       setState(() => _errorMessage = error.message);
     }
+  }
+}
+
+class _AiVisionAssistPanel extends StatelessWidget {
+  const _AiVisionAssistPanel({
+    required this.enabled,
+    required this.canUse,
+    required this.isLive,
+    required this.controller,
+    required this.onEnabledChanged,
+    required this.onAnalyzeNow,
+  });
+
+  final bool enabled;
+  final bool canUse;
+  final bool isLive;
+  final AiVisionAssistController controller;
+  final ValueChanged<bool> onEnabledChanged;
+  final VoidCallback? onAnalyzeNow;
+
+  @override
+  Widget build(BuildContext context) {
+    final decision = controller.lastDecision;
+    final colorScheme = Theme.of(context).colorScheme;
+    final statusColor = switch (decision?.level) {
+      AiHazardLevel.stop => colorScheme.error,
+      AiHazardLevel.caution => const Color(0xFFB45309),
+      AiHazardLevel.clear => colorScheme.primary,
+      null => colorScheme.onSurfaceVariant,
+    };
+    final objectSummary = decision == null || decision.objects.isEmpty
+        ? null
+        : decision.objects
+            .take(3)
+            .map((object) => object.displayLabel)
+            .join(', ');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.visibility),
+              title: const Text('AI 보조 안내'),
+              subtitle: Text(_statusText),
+              value: enabled,
+              onChanged: canUse ? onEnabledChanged : null,
+            ),
+            if (decision != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                '${decision.level.label} · ${decision.reason}',
+                style: TextStyle(
+                  color: statusColor,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (objectSummary != null) ...[
+                const SizedBox(height: 4),
+                Text('감지: $objectSummary'),
+              ],
+            ],
+            if (controller.errorMessage != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                controller.errorMessage!,
+                style: TextStyle(color: colorScheme.error),
+              ),
+            ],
+            if (enabled) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: onAnalyzeNow,
+                icon: const Icon(Icons.refresh),
+                label: const Text('지금 분석'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String get _statusText {
+    if (!canUse) {
+      return '러닝 가이드의 전방 카메라 모드에서 사용할 수 있습니다.';
+    }
+    if (!enabled) {
+      return '카메라 영상에서 가까운 물체를 감지하면 음성으로 알려줍니다.';
+    }
+    if (controller.isAnalyzing) {
+      return '분석 중';
+    }
+    if (controller.isRunning && isLive) {
+      return '실시간 보조 중';
+    }
+    return '라이브 시작 후 자동으로 동작합니다.';
   }
 }
 

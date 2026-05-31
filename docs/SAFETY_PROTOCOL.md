@@ -30,6 +30,18 @@ If video, audio, or signaling becomes unreliable:
 4. Running-guide rooms require an explicit resume confirmation before
    restarting the stream.
 
+## AI Assist Behavior
+
+AI assist is advisory. It may tell the runner to slow down or pause when the
+world-facing camera detects a large or low object in the forward path.
+
+- A stop decision must set the session safety state to `stop_now`.
+- AI assist must stop analyzing while the runner is paused for resume
+  confirmation.
+- AI assist must not be treated as a replacement for a human guide, route
+  control, or backup person during early pilots.
+- Camera frames are processed on device in the current mobile implementation.
+
 ## Test Restrictions
 
 Do not use early builds for:
