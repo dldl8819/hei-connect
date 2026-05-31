@@ -36,6 +36,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   bool _isStartingMedia = false;
   bool _supportEnabled = false;
   bool _aiAssistEnabled = false;
+  bool _aiVisionVerificationMode = false;
   bool _hasReportedConnectionLoss = false;
   bool _requiresResumeConfirmation = false;
   String? _errorMessage;
@@ -113,6 +114,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                       _sourceMode = LiveSourceMode.worldCamera;
                     } else {
                       _aiAssistEnabled = false;
+                      _aiVisionVerificationMode = false;
                       _aiAssist.stop();
                     }
                   });
@@ -143,6 +145,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                     }
                     if (sourceMode != LiveSourceMode.worldCamera) {
                       _aiAssistEnabled = false;
+                      _aiVisionVerificationMode = false;
                       _aiAssist.stop();
                     }
                   });
@@ -168,10 +171,38 @@ class _LiveHostPageState extends State<LiveHostPage> {
                       canUse: _canUseAiVisionAssist,
                       isLive: _isLive,
                       controller: _aiAssist,
+                      verificationModeEnabled: _aiVisionVerificationMode,
                       onEnabledChanged: _setAiAssistEnabled,
-                      onAnalyzeNow: _isLive && _aiAssistEnabled
+                      onVerificationModeChanged: _setAiVisionVerificationMode,
+                      onAnalyzeNow: _isLive &&
+                              _aiAssistEnabled &&
+                              !_aiVisionVerificationMode
                           ? () {
                               unawaited(_aiAssist.analyzeOnce());
+                            }
+                          : null,
+                      onSimulateSlowDown: _isLive &&
+                              _aiAssistEnabled &&
+                              _aiVisionVerificationMode
+                          ? () {
+                              unawaited(
+                                _runAiVisionVerificationCue(
+                                  level: AiHazardLevel.caution,
+                                  cue: VoiceCue.slowDown,
+                                ),
+                              );
+                            }
+                          : null,
+                      onSimulateStop: _isLive &&
+                              _aiAssistEnabled &&
+                              _aiVisionVerificationMode
+                          ? () {
+                              unawaited(
+                                _runAiVisionVerificationCue(
+                                  level: AiHazardLevel.stop,
+                                  cue: VoiceCue.stopNow,
+                                ),
+                              );
                             }
                           : null,
                     );
@@ -643,6 +674,17 @@ class _LiveHostPageState extends State<LiveHostPage> {
 
     setState(() {
       _aiAssistEnabled = enabled;
+      if (!enabled) {
+        _aiVisionVerificationMode = false;
+      }
+      _errorMessage = null;
+    });
+    _syncAiAssistWithLiveState();
+  }
+
+  void _setAiVisionVerificationMode(bool enabled) {
+    setState(() {
+      _aiVisionVerificationMode = enabled;
       _errorMessage = null;
     });
     _syncAiAssistWithLiveState();
@@ -652,6 +694,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
     if (_aiAssistEnabled &&
         _isLive &&
         _canUseAiVisionAssist &&
+        !_aiVisionVerificationMode &&
         !_requiresResumeConfirmation) {
       _aiAssist.start();
       return;
@@ -662,6 +705,23 @@ class _LiveHostPageState extends State<LiveHostPage> {
 
   void _handleAiVisionDecision(AiHazardDecision decision) {
     unawaited(_applyAiVisionDecision(decision));
+  }
+
+  Future<void> _runAiVisionVerificationCue({
+    required AiHazardLevel level,
+    required VoiceCue cue,
+  }) {
+    final decision = AiHazardDecision(
+      level: level,
+      cue: cue,
+      spokenText: level == AiHazardLevel.stop
+          ? 'AI 검증. 정지 안내 흐름을 확인합니다. 잠깐 멈추세요.'
+          : 'AI 검증. 감속 안내 흐름을 확인합니다. 천천히 가세요.',
+      reason: level == AiHazardLevel.stop ? '검증 모드 정지 큐' : '검증 모드 감속 큐',
+      objects: const [],
+      decidedAt: DateTime.now(),
+    );
+    return _applyAiVisionDecision(decision);
   }
 
   Future<void> _applyAiVisionDecision(AiHazardDecision decision) async {
@@ -991,16 +1051,24 @@ class _AiVisionAssistPanel extends StatelessWidget {
     required this.canUse,
     required this.isLive,
     required this.controller,
+    required this.verificationModeEnabled,
     required this.onEnabledChanged,
+    required this.onVerificationModeChanged,
     required this.onAnalyzeNow,
+    required this.onSimulateSlowDown,
+    required this.onSimulateStop,
   });
 
   final bool enabled;
   final bool canUse;
   final bool isLive;
   final AiVisionAssistController controller;
+  final bool verificationModeEnabled;
   final ValueChanged<bool> onEnabledChanged;
+  final ValueChanged<bool> onVerificationModeChanged;
   final VoidCallback? onAnalyzeNow;
+  final VoidCallback? onSimulateSlowDown;
+  final VoidCallback? onSimulateStop;
 
   @override
   Widget build(BuildContext context) {
@@ -1060,6 +1128,34 @@ class _AiVisionAssistPanel extends StatelessWidget {
             ],
             if (enabled) ...[
               const SizedBox(height: 10),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                secondary: const Icon(Icons.science),
+                title: const Text('검증 모드'),
+                subtitle: const Text('카메라 분석 없이 안내 흐름만 확인합니다.'),
+                value: verificationModeEnabled,
+                onChanged: onVerificationModeChanged,
+              ),
+              if (verificationModeEnabled) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: onSimulateSlowDown,
+                      icon: const Icon(Icons.directions_walk),
+                      label: const Text('감속 큐 테스트'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: onSimulateStop,
+                      icon: const Icon(Icons.report),
+                      label: const Text('정지 큐 테스트'),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 10),
               OutlinedButton.icon(
                 onPressed: onAnalyzeNow,
                 icon: const Icon(Icons.refresh),
@@ -1078,6 +1174,9 @@ class _AiVisionAssistPanel extends StatelessWidget {
     }
     if (!enabled) {
       return '카메라 영상에서 가까운 물체를 감지하면 음성으로 알려줍니다.';
+    }
+    if (verificationModeEnabled) {
+      return '검증 모드입니다. 카메라 분석은 멈추고 안내 흐름만 확인합니다.';
     }
     if (controller.isAnalyzing) {
       return '분석 중';
