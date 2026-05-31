@@ -44,6 +44,12 @@ environments such as tracks, closed loops, or parks without vehicle traffic.
 Road crossings, crowded races, and solo runs without a fallback plan are outside
 the MVP scope.
 
+Operational safety documents:
+
+- `docs/ANDROID_FIELD_TEST_CHECKLIST.md` for controlled Android field tests.
+- `docs/MVP_SAFETY_BOUNDARIES.md` for MVP allow/block decisions.
+- `docs/SAFETY_PROTOCOL.md` for stop, connection-loss, and AI assist behavior.
+
 ## Local Development
 
 Flutter/Dart, Android SDK, and Rust/Cargo are installed under

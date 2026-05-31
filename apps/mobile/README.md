@@ -114,5 +114,8 @@ or produce false alarms, so it must be tested only on controlled routes with a
 backup guide until the model, camera mount, route type, and latency are
 validated.
 
+Use `docs/ANDROID_FIELD_TEST_CHECKLIST.md` for controlled Android field tests
+and `docs/MVP_SAFETY_BOUNDARIES.md` for the MVP allow/block list.
+
 Chat is for short room coordination only. Do not put contact details, exact
 locations, credentials, or other sensitive personal data in chat.
