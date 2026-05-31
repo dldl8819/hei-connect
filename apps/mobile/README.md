@@ -30,6 +30,9 @@ Cross-platform mobile app skeleton for accessibility-first live sessions.
 - Host screen speaks incoming cues with Korean TTS.
 - Short live-room chat panel on host and supporter screens.
 - Host screen reads new supporter/system chat messages through Korean TTS.
+- Optional on-device AI assist for running-guide rooms. It samples the
+  world-facing camera stream, runs ML Kit object detection, and speaks a
+  slow-down or stop cue when the detected object geometry looks risky.
 - In-app route handling for shared live links and channel links.
 - Android and iOS native permission declarations for camera and microphone.
 - Screen-awake bridge while host or supporter media is connected.
@@ -42,8 +45,9 @@ Cross-platform mobile app skeleton for accessibility-first live sessions.
    with Xcode.
 3. Add live camera angle calibration for running-guide rooms.
 4. Add native camera switching between selfie and world-facing camera.
-5. Add reconnect and background connection handling.
-6. Add emergency contact notification after explicit consent and privacy review.
+5. Calibrate AI assist thresholds on controlled tracks with a backup guide.
+6. Add reconnect and background connection handling.
+7. Add emergency contact notification after explicit consent and privacy review.
 
 ## Invite Routes
 
@@ -67,6 +71,26 @@ flutter pub get
 flutter build apk --debug
 ```
 
+## iOS Verification From Windows
+
+Windows cannot run Xcode locally, so iOS compilation is checked through the
+`Mobile iOS Compile` GitHub Actions workflow. Push the branch to GitHub and run
+the workflow manually from the Actions tab, or open a pull request that changes
+`apps/mobile/**`.
+
+The workflow runs on a macOS runner and executes:
+
+```bash
+flutter pub get
+dart analyze
+dart run test
+flutter build ios --release --no-codesign
+```
+
+This verifies that the iOS project compiles without Apple signing credentials.
+Installing on an iPhone still requires a signed build through TestFlight or a
+Mac/Xcode signing environment.
+
 ## Native Permissions
 
 - Android declares camera, microphone, internet, audio settings, wake-lock, and
@@ -83,6 +107,12 @@ field pilots.
 
 TTS uses `flutter_tts` and should be tested on real devices with the intended
 open-ear audio output before any field pilot.
+
+AI assist is a local safety aid, not an autonomous guide. It currently uses
+ML Kit object detection and conservative bounding-box rules. It can miss hazards
+or produce false alarms, so it must be tested only on controlled routes with a
+backup guide until the model, camera mount, route type, and latency are
+validated.
 
 Chat is for short room coordination only. Do not put contact details, exact
 locations, credentials, or other sensitive personal data in chat.

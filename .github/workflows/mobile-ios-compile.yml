@@ -1,0 +1,60 @@
+name: Mobile iOS Compile
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/mobile-ios-compile.yml"
+      - "apps/mobile/**"
+      - "third_party/flutter_tts/**"
+      - "third_party/flutter_webrtc/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/mobile-ios-compile.yml"
+      - "apps/mobile/**"
+      - "third_party/flutter_tts/**"
+      - "third_party/flutter_webrtc/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ios-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-compile:
+    name: iOS compile without signing
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart
+        run: dart analyze
+
+      - name: Run Dart tests
+        run: dart run test
+
+      - name: Build iOS without code signing
+        run: flutter build ios --release --no-codesign
