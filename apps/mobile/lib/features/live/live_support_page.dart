@@ -17,6 +17,8 @@ import 'live_webrtc_controller.dart';
 import 'support_guide_flow.dart';
 import 'test_execution_checklist.dart';
 import 'test_execution_checklist_view.dart';
+import 'test_progress_guard.dart';
+import 'test_progress_guard_view.dart';
 import 'test_session_report.dart';
 import 'test_session_report_view.dart';
 
@@ -120,6 +122,7 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
                 builder: (context, _) {
                   return _SupportGuideControlPanel(
                     flowState: _supportGuideFlowState,
+                    progressGuardState: _guideTestProgressGuardState,
                     guideFlowState: _guideFlowState,
                     executionChecklistState: _testExecutionChecklistState,
                     report: _supportTestSessionReport,
@@ -460,6 +463,18 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
     );
   }
 
+  GuideTestProgressGuardState get _guideTestProgressGuardState {
+    final connectionLost = _webRtc.safetyStopRequired ||
+        _webRtc.phase == WebRtcPhase.connectionLost ||
+        _webRtc.phase == WebRtcPhase.failed;
+    return GuideTestProgressGuardState(
+      webRtcConnected: _webRtc.phase == WebRtcPhase.connected,
+      connectionLost: connectionLost,
+      stopCueAwaitingResume:
+          _lastStopCueSequence > _lastResumeConfirmedCueSequence,
+    );
+  }
+
   TestSessionReport get _supportTestSessionReport {
     return TestSessionReport(
       role: TestSessionReportRole.guide,
@@ -491,11 +506,11 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
     GuideFlowChecklistItem item,
     bool checked,
   ) {
-    final flowState = _supportGuideFlowState;
-    if (checked && !flowState.canCheckGuideFlow) {
+    final guard = _guideTestProgressGuardState.guideFlow;
+    if (checked && !guard.allowed) {
       setState(() {
         _confirmedGuideFlowItems.remove(item);
-        _errorMessage = '방송 연결 후 러너가 정지한 상태에서 확인해 주세요.';
+        _errorMessage = guard.reason;
       });
       return;
     }
@@ -510,7 +525,9 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
   }
 
   void _confirmResumeAfterStop() {
-    if (_lastStopCueSequence <= _lastResumeConfirmedCueSequence) {
+    final guard = _guideTestProgressGuardState.resumeConfirmation;
+    if (!guard.allowed) {
+      setState(() => _errorMessage = guard.reason);
       return;
     }
 
@@ -579,6 +596,7 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
 class _SupportGuideControlPanel extends StatelessWidget {
   const _SupportGuideControlPanel({
     required this.flowState,
+    required this.progressGuardState,
     required this.guideFlowState,
     required this.executionChecklistState,
     required this.report,
@@ -591,6 +609,7 @@ class _SupportGuideControlPanel extends StatelessWidget {
   });
 
   final SupportGuideFlowState flowState;
+  final GuideTestProgressGuardState progressGuardState;
   final GuideFlowChecklistState guideFlowState;
   final TestExecutionChecklistState executionChecklistState;
   final TestSessionReport report;
@@ -654,12 +673,19 @@ class _SupportGuideControlPanel extends StatelessWidget {
               _SupportSafetyHoldPanel(flowState: flowState),
             ],
             const SizedBox(height: 12),
+            TestProgressGuardView(
+              decisions: progressGuardState.decisions,
+              talkBackSummary: progressGuardState.talkBackSummary,
+            ),
+            const SizedBox(height: 12),
             _PrimaryGuideCueGrid(
               enabled: !isSendingCue,
               selectedCue: selectedCue,
-              resumeEnabled: flowState.stopCueAwaitingResume &&
-                  !flowState.connectionLost &&
+              resumeEnabled: progressGuardState.resumeConfirmation.allowed &&
                   !isSendingCue,
+              resumeBlockedReason: progressGuardState.resumeConfirmation.allowed
+                  ? null
+                  : progressGuardState.resumeConfirmation.reason,
               onCueSelected: onCueSelected,
               onResumeConfirmed: onResumeConfirmed,
             ),
@@ -682,6 +708,7 @@ class _SupportGuideControlPanel extends StatelessWidget {
             GuideFlowChecklistSection(
               state: guideFlowState,
               enabled: flowState.canCheckGuideFlow,
+              disabledHint: progressGuardState.guideFlow.reason,
               onItemChanged: onGuideFlowChecklistItemChanged,
             ),
             const SizedBox(height: 12),
@@ -739,6 +766,7 @@ class _PrimaryGuideCueGrid extends StatelessWidget {
     required this.enabled,
     required this.selectedCue,
     required this.resumeEnabled,
+    required this.resumeBlockedReason,
     required this.onCueSelected,
     required this.onResumeConfirmed,
   });
@@ -746,48 +774,69 @@ class _PrimaryGuideCueGrid extends StatelessWidget {
   final bool enabled;
   final VoiceCue selectedCue;
   final bool resumeEnabled;
+  final String? resumeBlockedReason;
   final ValueChanged<VoiceCue> onCueSelected;
   final VoidCallback onResumeConfirmed;
 
   @override
   Widget build(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 2,
-      crossAxisSpacing: 8,
-      mainAxisSpacing: 8,
-      childAspectRatio: 2.8,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _GuideCueButton(
-          icon: Icons.directions_walk,
-          label: '감속',
-          selected: selectedCue == VoiceCue.slowDown,
-          enabled: enabled,
-          onPressed: () => onCueSelected(VoiceCue.slowDown),
+        GridView.count(
+          crossAxisCount: 2,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+          childAspectRatio: 2.8,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          children: [
+            _GuideCueButton(
+              icon: Icons.directions_walk,
+              label: '감속',
+              selected: selectedCue == VoiceCue.slowDown,
+              enabled: enabled,
+              onPressed: () => onCueSelected(VoiceCue.slowDown),
+            ),
+            _GuideCueButton(
+              icon: Icons.check_circle,
+              label: '유지',
+              selected: selectedCue == VoiceCue.holdPace,
+              enabled: enabled,
+              onPressed: () => onCueSelected(VoiceCue.holdPace),
+            ),
+            _GuideCueButton(
+              icon: Icons.report,
+              label: '정지',
+              selected: selectedCue == VoiceCue.stopNow,
+              enabled: enabled,
+              danger: true,
+              onPressed: () => onCueSelected(VoiceCue.stopNow),
+            ),
+            _GuideCueButton(
+              icon: Icons.restart_alt,
+              label: '재개 확인',
+              selected: false,
+              enabled: resumeEnabled,
+              onPressed: onResumeConfirmed,
+            ),
+          ],
         ),
-        _GuideCueButton(
-          icon: Icons.check_circle,
-          label: '유지',
-          selected: selectedCue == VoiceCue.holdPace,
-          enabled: enabled,
-          onPressed: () => onCueSelected(VoiceCue.holdPace),
-        ),
-        _GuideCueButton(
-          icon: Icons.report,
-          label: '정지',
-          selected: selectedCue == VoiceCue.stopNow,
-          enabled: enabled,
-          danger: true,
-          onPressed: () => onCueSelected(VoiceCue.stopNow),
-        ),
-        _GuideCueButton(
-          icon: Icons.restart_alt,
-          label: '재개 확인',
-          selected: false,
-          enabled: resumeEnabled,
-          onPressed: onResumeConfirmed,
-        ),
+        if (resumeBlockedReason != null) ...[
+          const SizedBox(height: 8),
+          Semantics(
+            liveRegion: true,
+            label: '재개 확인 차단. $resumeBlockedReason',
+            child: Text(
+              resumeBlockedReason!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.error,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+        ],
       ],
     );
   }

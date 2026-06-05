@@ -18,6 +18,8 @@ import 'live_signaling_models.dart';
 import 'live_webrtc_controller.dart';
 import 'test_execution_checklist.dart';
 import 'test_execution_checklist_view.dart';
+import 'test_progress_guard.dart';
+import 'test_progress_guard_view.dart';
 import 'test_session_report.dart';
 import 'test_session_report_view.dart';
 
@@ -216,11 +218,23 @@ class _LiveHostPageState extends State<LiveHostPage> {
                       guideFlowState: _guideFlowState,
                       verificationModeEnabled: _aiVisionVerificationMode,
                       verificationDecision: _lastAiVerificationDecision,
+                      verificationModeBlockedReason:
+                          _runnerTestProgressGuardState.aiVerification.allowed
+                              ? null
+                              : _runnerTestProgressGuardState
+                                  .aiVerification.reason,
+                      actualAnalysisBlockedReason:
+                          _runnerTestProgressGuardState.actualAiAnalysis.allowed
+                              ? null
+                              : _runnerTestProgressGuardState
+                                  .actualAiAnalysis.reason,
                       onEnabledChanged: _setAiAssistEnabled,
                       onVerificationModeChanged: _setAiVisionVerificationMode,
                       onAnalyzeNow: _isLive &&
                               _aiAssistEnabled &&
-                              !_aiVisionVerificationMode
+                              !_aiVisionVerificationMode &&
+                              _runnerTestProgressGuardState
+                                  .actualAiAnalysis.allowed
                           ? () {
                               unawaited(_aiAssist.analyzeOnce());
                             }
@@ -278,6 +292,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           confirmedGuideFlowItems: _confirmedGuideFlowItems,
                           onGuideFlowChecklistItemChanged:
                               _setGuideFlowChecklistItem,
+                          guideFlowDisabledHint:
+                              _runnerTestProgressGuardState.guideFlow.reason,
                           aiAssistEnabled: _aiAssistEnabled,
                           aiVerificationMode: _aiVisionVerificationMode,
                           canUseAiVisionAssist: _canUseAiVisionAssist,
@@ -305,6 +321,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           executionChecklistState: _testExecutionChecklistState,
                           onExecutionChecklistItemChanged:
                               _setTestExecutionChecklistItem,
+                          progressGuardState: _runnerTestProgressGuardState,
                           report: _fieldTestSessionReport,
                           active: _fieldTestModeActive,
                           lastSummary: _lastFieldTestSummary,
@@ -508,6 +525,16 @@ class _LiveHostPageState extends State<LiveHostPage> {
 
   TestExecutionChecklistState get _testExecutionChecklistState {
     return TestExecutionChecklistState(_completedTestExecutionItems);
+  }
+
+  RunnerTestProgressGuardState get _runnerTestProgressGuardState {
+    return RunnerTestProgressGuardState(
+      isLive: _isLive,
+      webRtcConnected: _webRtc.phase == WebRtcPhase.connected,
+      guideFlowComplete: _guideFlowState.allowsAiAssist,
+      aiVerificationChecked: _lastAiVerificationDecision != null,
+      reportReady: _fieldTestSessionReport.isReady,
+    );
   }
 
   TestSessionReport get _fieldTestSessionReport {
@@ -1016,6 +1043,16 @@ class _LiveHostPageState extends State<LiveHostPage> {
   }
 
   void _setAiVisionVerificationMode(bool enabled) {
+    final guard = _runnerTestProgressGuardState.aiVerification;
+    if (enabled && !guard.allowed) {
+      setState(() {
+        _aiVisionVerificationMode = false;
+        _errorMessage = guard.reason;
+      });
+      _syncAiAssistWithLiveState();
+      return;
+    }
+
     setState(() {
       _aiVisionVerificationMode = enabled;
       _errorMessage = null;
@@ -1401,6 +1438,8 @@ class _AiVisionAssistPanel extends StatelessWidget {
     required this.guideFlowState,
     required this.verificationModeEnabled,
     required this.verificationDecision,
+    required this.verificationModeBlockedReason,
+    required this.actualAnalysisBlockedReason,
     required this.onEnabledChanged,
     required this.onVerificationModeChanged,
     required this.onAnalyzeNow,
@@ -1416,6 +1455,8 @@ class _AiVisionAssistPanel extends StatelessWidget {
   final GuideFlowChecklistState guideFlowState;
   final bool verificationModeEnabled;
   final AiHazardDecision? verificationDecision;
+  final String? verificationModeBlockedReason;
+  final String? actualAnalysisBlockedReason;
   final ValueChanged<bool> onEnabledChanged;
   final ValueChanged<bool> onVerificationModeChanged;
   final VoidCallback? onAnalyzeNow;
@@ -1524,8 +1565,26 @@ class _AiVisionAssistPanel extends StatelessWidget {
                 title: const Text('검증 모드'),
                 subtitle: const Text('카메라 분석 없이 안내 흐름만 확인합니다.'),
                 value: verificationModeEnabled,
-                onChanged: onVerificationModeChanged,
+                onChanged: verificationModeEnabled ||
+                        verificationModeBlockedReason == null
+                    ? onVerificationModeChanged
+                    : null,
               ),
+              if (!verificationModeEnabled &&
+                  verificationModeBlockedReason != null) ...[
+                const SizedBox(height: 8),
+                Semantics(
+                  liveRegion: true,
+                  label: 'AI 검증 모드 차단. $verificationModeBlockedReason',
+                  child: Text(
+                    verificationModeBlockedReason!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.error,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
+              ],
               if (verificationModeEnabled) ...[
                 const SizedBox(height: 8),
                 Wrap(
@@ -1546,6 +1605,21 @@ class _AiVisionAssistPanel extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 10),
+              if (!verificationModeEnabled &&
+                  actualAnalysisBlockedReason != null) ...[
+                Semantics(
+                  liveRegion: true,
+                  label: '지금 분석 차단. $actualAnalysisBlockedReason',
+                  child: Text(
+                    actualAnalysisBlockedReason!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.error,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               OutlinedButton.icon(
                 onPressed: onAnalyzeNow,
                 icon: const Icon(Icons.refresh),
@@ -1688,6 +1762,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
     required this.fieldErrorMessage,
     required this.confirmedGuideFlowItems,
     required this.onGuideFlowChecklistItemChanged,
+    required this.guideFlowDisabledHint,
     required this.aiAssistEnabled,
     required this.aiVerificationMode,
     required this.canUseAiVisionAssist,
@@ -1710,6 +1785,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
   final Set<GuideFlowChecklistItem> confirmedGuideFlowItems;
   final void Function(GuideFlowChecklistItem item, bool checked)
       onGuideFlowChecklistItemChanged;
+  final String guideFlowDisabledHint;
   final bool aiAssistEnabled;
   final bool aiVerificationMode;
   final bool canUseAiVisionAssist;
@@ -1828,6 +1904,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
             GuideFlowChecklistSection(
               state: _guideFlowState,
               enabled: _canConfirmGuideFlow,
+              disabledHint: guideFlowDisabledHint,
               onItemChanged: onGuideFlowChecklistItemChanged,
             ),
             DecoratedBox(
@@ -2430,6 +2507,7 @@ class _FieldTestModePanel extends StatelessWidget {
     required this.testOrderState,
     required this.executionChecklistState,
     required this.onExecutionChecklistItemChanged,
+    required this.progressGuardState,
     required this.report,
     required this.active,
     required this.lastSummary,
@@ -2452,6 +2530,7 @@ class _FieldTestModePanel extends StatelessWidget {
   final TestExecutionChecklistState executionChecklistState;
   final void Function(TestExecutionChecklistItem item, bool checked)
       onExecutionChecklistItemChanged;
+  final RunnerTestProgressGuardState progressGuardState;
   final TestSessionReport report;
   final bool active;
   final FieldTestModeSummary? lastSummary;
@@ -2492,6 +2571,11 @@ class _FieldTestModePanel extends StatelessWidget {
             TestExecutionChecklistView(
               state: executionChecklistState,
               onItemChanged: onExecutionChecklistItemChanged,
+            ),
+            const SizedBox(height: 12),
+            TestProgressGuardView(
+              decisions: progressGuardState.decisions,
+              talkBackSummary: progressGuardState.talkBackSummary,
             ),
             const SizedBox(height: 12),
             if (active)

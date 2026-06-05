@@ -75,11 +75,13 @@ class GuideFlowChecklistSection extends StatelessWidget {
     required this.state,
     required this.enabled,
     required this.onItemChanged,
+    this.disabledHint,
   });
 
   final GuideFlowChecklistState state;
   final bool enabled;
   final void Function(GuideFlowChecklistItem item, bool checked) onItemChanged;
+  final String? disabledHint;
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +115,7 @@ class GuideFlowChecklistSection extends StatelessWidget {
             item: item,
             checked: state.contains(item),
             enabled: enabled,
+            disabledHint: disabledHint,
             onChanged: onItemChanged,
           ),
       ],
@@ -149,19 +152,23 @@ class _GuideFlowChecklistTile extends StatelessWidget {
     required this.item,
     required this.checked,
     required this.enabled,
+    required this.disabledHint,
     required this.onChanged,
   });
 
   final GuideFlowChecklistItem item;
   final bool checked;
   final bool enabled;
+  final String? disabledHint;
   final void Function(GuideFlowChecklistItem item, bool checked) onChanged;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       label: item.checkedSemanticsLabel(checked),
-      hint: enabled ? item.checkHint : '라이브와 WebRTC 연결 후 확인할 수 있습니다.',
+      hint: enabled
+          ? item.checkHint
+          : disabledHint ?? '라이브와 WebRTC 연결 후 확인할 수 있습니다.',
       checked: checked,
       enabled: enabled,
       child: CheckboxListTile(
