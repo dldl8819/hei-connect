@@ -295,6 +295,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                         return _FieldTestModePanel(
                           gate: _fieldTestModeStartGate,
                           snapshot: _fieldTestModeSnapshot,
+                          testOrderState: _fieldTestDeviceTestOrderState,
                           active: _fieldTestModeActive,
                           lastSummary: _lastFieldTestSummary,
                           memo: _fieldTestResultMemo,
@@ -467,6 +468,24 @@ class _LiveHostPageState extends State<LiveHostPage> {
     );
   }
 
+  FieldTestDeviceTestOrderState get _fieldTestDeviceTestOrderState {
+    final purpose = _session?.purpose ?? _purpose;
+    final sourceMode = _session?.sourceMode ?? _sourceMode;
+    return FieldTestDeviceTestOrderState(
+      isRunningGuide: purpose == LiveSessionPurpose.runningGuide,
+      runnerModeSelected: true,
+      isWorldCamera: sourceMode == LiveSourceMode.worldCamera,
+      preRunChecklistComplete: _isPreRunChecklistComplete,
+      sessionCreated: _session != null,
+      isLive: _isLive,
+      webRtcConnected: _webRtc.phase == WebRtcPhase.connected,
+      guideFlowState: _guideFlowState,
+      aiVerificationChecked: _lastAiVerificationDecision != null,
+      actualAiAnalysisChecked:
+          !_aiVisionVerificationMode && _aiAssist.lastDecision != null,
+    );
+  }
+
   FieldTestResultMemo get _fieldTestResultMemo {
     return FieldTestResultMemo.fromInput(
       failureStep: _fieldTestFailureStepController.text,
@@ -528,6 +547,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
       if (!nextGuideFlowState.allowsAiAssist) {
         _aiAssistEnabled = false;
         _aiVisionVerificationMode = false;
+        _lastAiVerificationDecision = null;
         _aiAssist.stop();
       }
       _errorMessage = null;
@@ -539,6 +559,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
     _confirmedGuideFlowItems.clear();
     _aiAssistEnabled = false;
     _aiVisionVerificationMode = false;
+    _lastAiVerificationDecision = null;
     _aiAssist.stop();
   }
 
@@ -2364,6 +2385,7 @@ class _FieldTestModePanel extends StatelessWidget {
   const _FieldTestModePanel({
     required this.gate,
     required this.snapshot,
+    required this.testOrderState,
     required this.active,
     required this.lastSummary,
     required this.memo,
@@ -2381,6 +2403,7 @@ class _FieldTestModePanel extends StatelessWidget {
 
   final FieldTestModeStartGate gate;
   final FieldTestModeSnapshot snapshot;
+  final FieldTestDeviceTestOrderState testOrderState;
   final bool active;
   final FieldTestModeSummary? lastSummary;
   final FieldTestResultMemo memo;
@@ -2415,6 +2438,8 @@ class _FieldTestModePanel extends StatelessWidget {
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 12),
+            _FieldTestDeviceOrderView(order: testOrderState),
+            const SizedBox(height: 12),
             if (active)
               _ActiveFieldTestModeSummary(snapshot: snapshot, onEnd: onEnd)
             else
@@ -2438,6 +2463,147 @@ class _FieldTestModePanel extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _FieldTestDeviceOrderView extends StatelessWidget {
+  const _FieldTestDeviceOrderView({required this.order});
+
+  final FieldTestDeviceTestOrderState order;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Semantics(
+      liveRegion: true,
+      label: order.talkBackSummary,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  '실기기 테스트 순서',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  child: Text(
+                    order.progressLabel,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final step in order.steps) ...[
+            _FieldTestDeviceOrderStepRow(step: step),
+            const SizedBox(height: 6),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _FieldTestDeviceOrderStepRow extends StatelessWidget {
+  const _FieldTestDeviceOrderStepRow({required this.step});
+
+  final FieldTestDeviceTestStep step;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = _statusColor(context);
+    return Semantics(
+      label: step.semanticsLabel,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _statusBackgroundColor(context),
+              border: Border.all(color: color),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '${step.number}',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  step.title,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight:
+                            step.status == FieldTestDeviceStepStatus.current
+                                ? FontWeight.w800
+                                : FontWeight.w700,
+                      ),
+                ),
+                Text(
+                  step.detail,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            step.status.label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _statusColor(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return switch (step.status) {
+      FieldTestDeviceStepStatus.completed => colorScheme.primary,
+      FieldTestDeviceStepStatus.current => const Color(0xFFB45309),
+      FieldTestDeviceStepStatus.pending => colorScheme.onSurfaceVariant,
+    };
+  }
+
+  Color _statusBackgroundColor(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return switch (step.status) {
+      FieldTestDeviceStepStatus.completed => colorScheme.primaryContainer,
+      FieldTestDeviceStepStatus.current => const Color(0xFFFFF7ED),
+      FieldTestDeviceStepStatus.pending => colorScheme.surface,
+    };
   }
 }
 

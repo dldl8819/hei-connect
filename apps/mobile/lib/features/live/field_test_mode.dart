@@ -195,6 +195,152 @@ class FieldTestModeSummaryRow {
   final String value;
 }
 
+enum FieldTestDeviceStepStatus {
+  completed,
+  current,
+  pending,
+}
+
+extension FieldTestDeviceStepStatusLabel on FieldTestDeviceStepStatus {
+  String get label {
+    return switch (this) {
+      FieldTestDeviceStepStatus.completed => '완료',
+      FieldTestDeviceStepStatus.current => '현재',
+      FieldTestDeviceStepStatus.pending => '대기',
+    };
+  }
+}
+
+class FieldTestDeviceTestStep {
+  const FieldTestDeviceTestStep({
+    required this.number,
+    required this.title,
+    required this.detail,
+    required this.status,
+  });
+
+  final int number;
+  final String title;
+  final String detail;
+  final FieldTestDeviceStepStatus status;
+
+  String get semanticsLabel {
+    return '$number단계 $title, ${status.label}. $detail';
+  }
+}
+
+class FieldTestDeviceTestOrderState {
+  const FieldTestDeviceTestOrderState({
+    required this.isRunningGuide,
+    required this.runnerModeSelected,
+    required this.isWorldCamera,
+    required this.preRunChecklistComplete,
+    required this.sessionCreated,
+    required this.isLive,
+    required this.webRtcConnected,
+    required this.guideFlowState,
+    required this.aiVerificationChecked,
+    required this.actualAiAnalysisChecked,
+  });
+
+  final bool isRunningGuide;
+  final bool runnerModeSelected;
+  final bool isWorldCamera;
+  final bool preRunChecklistComplete;
+  final bool sessionCreated;
+  final bool isLive;
+  final bool webRtcConnected;
+  final GuideFlowChecklistState guideFlowState;
+  final bool aiVerificationChecked;
+  final bool actualAiAnalysisChecked;
+
+  List<FieldTestDeviceTestStep> get steps {
+    const titles = [
+      '러닝 가이드 선택',
+      '러너 모드 선택',
+      '눈앞 카메라 선택',
+      '러닝 전 안전 체크 완료',
+      '라이브 세션 생성',
+      '라이브 시작 및 권한 허용',
+      '가이드 참여 및 WebRTC 연결',
+      '가이드 흐름 5개 항목 확인',
+      'AI 검증 모드 확인',
+      '실제 AI 분석은 정지 상태에서만 확인',
+    ];
+    const details = [
+      '방 종류를 러닝 가이드로 맞춥니다.',
+      '비시각장애러너, 저시력자, 전맹 중 테스트 대상 모드를 맞춥니다.',
+      '방송 소스를 눈앞 카메라로 맞춥니다.',
+      '통제 경로와 백업 동행자 기준을 먼저 확인합니다.',
+      '세션을 만든 뒤 다음 단계로 갑니다.',
+      '러너가 정지한 상태에서 카메라와 마이크 권한을 허용합니다.',
+      '가이드가 참여하고 WebRTC 상태가 연결됨인지 확인합니다.',
+      '영상, 음성, cue, 채팅 TTS, 정지 후 재개를 모두 확인합니다.',
+      '검증 모드에서 감속 큐와 정지 큐 흐름을 확인합니다.',
+      '러너가 정지한 상태에서만 지금 분석을 눌러 확인합니다.',
+    ];
+    final completedFlags = [
+      isRunningGuide,
+      runnerModeSelected,
+      isWorldCamera,
+      preRunChecklistComplete,
+      sessionCreated,
+      isLive,
+      webRtcConnected,
+      guideFlowState.allowsAiAssist,
+      aiVerificationChecked,
+      actualAiAnalysisChecked,
+    ];
+
+    final result = <FieldTestDeviceTestStep>[];
+    var currentAssigned = false;
+    for (var index = 0; index < titles.length; index += 1) {
+      final status = currentAssigned
+          ? FieldTestDeviceStepStatus.pending
+          : completedFlags[index]
+              ? FieldTestDeviceStepStatus.completed
+              : FieldTestDeviceStepStatus.current;
+      if (status == FieldTestDeviceStepStatus.current) {
+        currentAssigned = true;
+      }
+      result.add(
+        FieldTestDeviceTestStep(
+          number: index + 1,
+          title: titles[index],
+          detail: details[index],
+          status: status,
+        ),
+      );
+    }
+    return List<FieldTestDeviceTestStep>.unmodifiable(result);
+  }
+
+  int get completedCount {
+    return steps
+        .where((step) => step.status == FieldTestDeviceStepStatus.completed)
+        .length;
+  }
+
+  bool get isComplete => completedCount == steps.length;
+
+  FieldTestDeviceTestStep get currentStep {
+    return steps.firstWhere(
+      (step) => step.status == FieldTestDeviceStepStatus.current,
+      orElse: () => steps.last,
+    );
+  }
+
+  String get progressLabel => '$completedCount/${steps.length} 완료';
+
+  String get talkBackSummary {
+    if (isComplete) {
+      return '실기기 테스트 순서. 모든 단계 완료. 통제 경로와 백업 동행자 기준을 계속 유지합니다.';
+    }
+    return '실기기 테스트 순서. $progressLabel. 현재 단계는 '
+        '${currentStep.number}단계 ${currentStep.title}. ${currentStep.detail}';
+  }
+}
+
 class FieldTestResultMemo {
   const FieldTestResultMemo._({
     required this.failureStep,

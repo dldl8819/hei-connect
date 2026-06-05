@@ -159,4 +159,141 @@ void main() {
     expect(renderedRows, isNot(contains('위치 정보')));
     expect(renderedRows, isNot(contains('연락처')));
   });
+
+  test('device test order starts at running guide selection', () {
+    final order = FieldTestDeviceTestOrderState(
+      isRunningGuide: false,
+      runnerModeSelected: false,
+      isWorldCamera: false,
+      preRunChecklistComplete: false,
+      sessionCreated: false,
+      isLive: false,
+      webRtcConnected: false,
+      guideFlowState: GuideFlowChecklistState(),
+      aiVerificationChecked: false,
+      actualAiAnalysisChecked: false,
+    );
+
+    expect(order.completedCount, 0);
+    expect(order.currentStep.number, 1);
+    expect(order.currentStep.title, '러닝 가이드 선택');
+    expect(order.steps[0].status, FieldTestDeviceStepStatus.current);
+    expect(order.steps[1].status, FieldTestDeviceStepStatus.pending);
+  });
+
+  test('device test order marks live start before WebRTC connection', () {
+    final order = FieldTestDeviceTestOrderState(
+      isRunningGuide: true,
+      runnerModeSelected: true,
+      isWorldCamera: true,
+      preRunChecklistComplete: true,
+      sessionCreated: true,
+      isLive: false,
+      webRtcConnected: false,
+      guideFlowState: GuideFlowChecklistState(),
+      aiVerificationChecked: false,
+      actualAiAnalysisChecked: false,
+    );
+
+    expect(order.completedCount, 5);
+    expect(order.currentStep.number, 6);
+    expect(order.currentStep.title, '라이브 시작 및 권한 허용');
+    expect(order.steps[6].status, FieldTestDeviceStepStatus.pending);
+  });
+
+  test('device test order waits for partial guide-flow completion', () {
+    final order = FieldTestDeviceTestOrderState(
+      isRunningGuide: true,
+      runnerModeSelected: true,
+      isWorldCamera: true,
+      preRunChecklistComplete: true,
+      sessionCreated: true,
+      isLive: true,
+      webRtcConnected: true,
+      guideFlowState: GuideFlowChecklistState([
+        GuideFlowChecklistItem.webRtcVideo,
+        GuideFlowChecklistItem.guideVoice,
+      ]),
+      aiVerificationChecked: false,
+      actualAiAnalysisChecked: false,
+    );
+
+    expect(order.completedCount, 7);
+    expect(order.currentStep.number, 8);
+    expect(order.currentStep.title, '가이드 흐름 5개 항목 확인');
+    expect(order.progressLabel, '7/10 완료');
+  });
+
+  test('device test order waits for AI verification after 5 of 5 guide flow',
+      () {
+    final order = FieldTestDeviceTestOrderState(
+      isRunningGuide: true,
+      runnerModeSelected: true,
+      isWorldCamera: true,
+      preRunChecklistComplete: true,
+      sessionCreated: true,
+      isLive: true,
+      webRtcConnected: true,
+      guideFlowState: GuideFlowChecklistState(GuideFlowChecklistState.items),
+      aiVerificationChecked: false,
+      actualAiAnalysisChecked: false,
+    );
+
+    expect(order.completedCount, 8);
+    expect(order.currentStep.number, 9);
+    expect(order.currentStep.title, 'AI 검증 모드 확인');
+    expect(order.steps[9].status, FieldTestDeviceStepStatus.pending);
+  });
+
+  test('device test order waits for stationary actual AI analysis', () {
+    final order = FieldTestDeviceTestOrderState(
+      isRunningGuide: true,
+      runnerModeSelected: true,
+      isWorldCamera: true,
+      preRunChecklistComplete: true,
+      sessionCreated: true,
+      isLive: true,
+      webRtcConnected: true,
+      guideFlowState: GuideFlowChecklistState(GuideFlowChecklistState.items),
+      aiVerificationChecked: true,
+      actualAiAnalysisChecked: false,
+    );
+
+    expect(order.completedCount, 9);
+    expect(order.currentStep.number, 10);
+    expect(order.currentStep.title, '실제 AI 분석은 정지 상태에서만 확인');
+    expect(order.talkBackSummary, contains('현재 단계는 10단계'));
+  });
+
+  test('device test order structure has no sensitive data labels', () {
+    final order = FieldTestDeviceTestOrderState(
+      isRunningGuide: true,
+      runnerModeSelected: true,
+      isWorldCamera: true,
+      preRunChecklistComplete: true,
+      sessionCreated: true,
+      isLive: true,
+      webRtcConnected: true,
+      guideFlowState: GuideFlowChecklistState(GuideFlowChecklistState.items),
+      aiVerificationChecked: true,
+      actualAiAnalysisChecked: true,
+    );
+    final rendered = [
+      order.progressLabel,
+      order.talkBackSummary,
+      for (final step in order.steps) ...[
+        step.title,
+        step.detail,
+        step.semanticsLabel,
+      ],
+    ].join('\n');
+
+    expect(order.isComplete, isTrue);
+    expect(rendered, isNot(contains('참여 링크')));
+    expect(rendered, isNot(contains('세션 코드')));
+    expect(rendered, isNot(contains('채팅 원문')));
+    expect(rendered, isNot(contains('카메라 원본')));
+    expect(rendered, isNot(contains('위치 정보')));
+    expect(rendered, isNot(contains('연락처')));
+  });
 }
