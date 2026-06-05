@@ -194,3 +194,91 @@ class FieldTestModeSummaryRow {
   final String label;
   final String value;
 }
+
+class FieldTestResultMemo {
+  const FieldTestResultMemo._({
+    required this.failureStep,
+    required this.expectedResult,
+    required this.actualResult,
+    required this.reproductionSteps,
+    required this.sensitiveInfoRemoved,
+    required this.hasTruncatedInput,
+  });
+
+  static const int maxFieldLength = 240;
+
+  factory FieldTestResultMemo.fromInput({
+    String failureStep = '',
+    String expectedResult = '',
+    String actualResult = '',
+    String reproductionSteps = '',
+    bool sensitiveInfoRemoved = false,
+  }) {
+    final fields = [
+      failureStep,
+      expectedResult,
+      actualResult,
+      reproductionSteps,
+    ];
+    return FieldTestResultMemo._(
+      failureStep: _normalize(failureStep),
+      expectedResult: _normalize(expectedResult),
+      actualResult: _normalize(actualResult),
+      reproductionSteps: _normalize(reproductionSteps),
+      sensitiveInfoRemoved: sensitiveInfoRemoved,
+      hasTruncatedInput: fields.any(_isTooLong),
+    );
+  }
+
+  static String _normalize(String value) {
+    final trimmed = value.trim();
+    if (trimmed.length <= maxFieldLength) {
+      return trimmed;
+    }
+    return trimmed.substring(0, maxFieldLength);
+  }
+
+  static bool _isTooLong(String value) {
+    return value.trim().length > maxFieldLength;
+  }
+
+  final String failureStep;
+  final String expectedResult;
+  final String actualResult;
+  final String reproductionSteps;
+  final bool sensitiveInfoRemoved;
+  final bool hasTruncatedInput;
+
+  bool get isEmpty {
+    return failureStep.isEmpty &&
+        expectedResult.isEmpty &&
+        actualResult.isEmpty &&
+        reproductionSteps.isEmpty;
+  }
+
+  bool get isReadyForLocalReview => !isEmpty && sensitiveInfoRemoved;
+
+  String get safetyStatusLabel {
+    if (sensitiveInfoRemoved) {
+      return '민감정보 제거 확인 완료';
+    }
+    return '민감정보 제거 확인 필요';
+  }
+
+  String? get lengthNotice {
+    if (!hasTruncatedInput) {
+      return null;
+    }
+    return '긴 입력은 항목당 $maxFieldLength자까지만 화면에 보관합니다.';
+  }
+
+  List<FieldTestModeSummaryRow> get rows {
+    return [
+      FieldTestModeSummaryRow(label: '실패 단계', value: failureStep),
+      FieldTestModeSummaryRow(label: '기대 결과', value: expectedResult),
+      FieldTestModeSummaryRow(label: '실제 결과', value: actualResult),
+      FieldTestModeSummaryRow(label: '재현 순서', value: reproductionSteps),
+      FieldTestModeSummaryRow(label: '민감정보 제거', value: safetyStatusLabel),
+    ];
+  }
+}

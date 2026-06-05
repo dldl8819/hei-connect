@@ -89,4 +89,74 @@ void main() {
     expect(renderedRows, isNot(contains('카메라 원본')));
     expect(renderedRows, isNot(contains('위치 정보')));
   });
+
+  test('creates an empty local test memo', () {
+    final memo = FieldTestResultMemo.fromInput();
+
+    expect(memo.isEmpty, isTrue);
+    expect(memo.isReadyForLocalReview, isFalse);
+    expect(memo.safetyStatusLabel, '민감정보 제거 확인 필요');
+  });
+
+  test('creates a normal local test memo with operational facts only', () {
+    final memo = FieldTestResultMemo.fromInput(
+      failureStep: '가이드 흐름 확인',
+      expectedResult: '짧은 채팅 TTS가 들림',
+      actualResult: 'TTS가 들리지 않음',
+      reproductionSteps: '라이브 연결 후 짧은 테스트 메시지 전송',
+      sensitiveInfoRemoved: true,
+    );
+
+    expect(memo.isEmpty, isFalse);
+    expect(memo.isReadyForLocalReview, isTrue);
+    expect(memo.rows[0].value, '가이드 흐름 확인');
+    expect(memo.rows.last.value, '민감정보 제거 확인 완료');
+  });
+
+  test('requires sensitive-info removal confirmation before local review', () {
+    final memo = FieldTestResultMemo.fromInput(
+      failureStep: 'AI 검증',
+      expectedResult: '정지 cue 후 재개 확인 필요',
+      actualResult: '재개 확인 표시 없음',
+      reproductionSteps: '정지 큐 테스트 실행',
+      sensitiveInfoRemoved: false,
+    );
+
+    expect(memo.isReadyForLocalReview, isFalse);
+    expect(memo.safetyStatusLabel, '민감정보 제거 확인 필요');
+  });
+
+  test('limits overly long memo input', () {
+    final longText = '가' * (FieldTestResultMemo.maxFieldLength + 10);
+    final memo = FieldTestResultMemo.fromInput(
+      failureStep: longText,
+      sensitiveInfoRemoved: true,
+    );
+
+    expect(memo.failureStep.length, FieldTestResultMemo.maxFieldLength);
+    expect(memo.hasTruncatedInput, isTrue);
+    expect(
+      memo.lengthNotice,
+      '긴 입력은 항목당 ${FieldTestResultMemo.maxFieldLength}자까지만 화면에 보관합니다.',
+    );
+  });
+
+  test('memo rows do not include forbidden data fields', () {
+    final memo = FieldTestResultMemo.fromInput(
+      failureStep: '라이브 연결',
+      expectedResult: 'WebRTC 연결됨',
+      actualResult: '응답 대기',
+      reproductionSteps: '신호 새로고침 실행',
+      sensitiveInfoRemoved: true,
+    );
+    final renderedRows =
+        memo.rows.map((row) => '${row.label}: ${row.value}').join('\n');
+
+    expect(renderedRows, isNot(contains('참여 링크')));
+    expect(renderedRows, isNot(contains('세션 코드')));
+    expect(renderedRows, isNot(contains('채팅 원문')));
+    expect(renderedRows, isNot(contains('카메라 원본')));
+    expect(renderedRows, isNot(contains('위치 정보')));
+    expect(renderedRows, isNot(contains('연락처')));
+  });
 }

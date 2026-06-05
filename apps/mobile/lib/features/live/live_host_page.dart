@@ -27,6 +27,14 @@ class LiveHostPage extends StatefulWidget {
 class _LiveHostPageState extends State<LiveHostPage> {
   final LiveSessionApi _api = LiveSessionApi();
   final TextEditingController _channelTitleController = TextEditingController();
+  final TextEditingController _fieldTestFailureStepController =
+      TextEditingController();
+  final TextEditingController _fieldTestExpectedResultController =
+      TextEditingController();
+  final TextEditingController _fieldTestActualResultController =
+      TextEditingController();
+  final TextEditingController _fieldTestReproductionStepsController =
+      TextEditingController();
   final CueSpeaker _cueSpeaker = CueSpeaker();
   final ScreenAwake _screenAwake = ScreenAwake();
   late final LiveWebRtcController _webRtc;
@@ -43,6 +51,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   bool _aiVisionVerificationMode = false;
   bool _hasReportedConnectionLoss = false;
   bool _fieldTestModeActive = false;
+  bool _fieldTestSensitiveInfoRemoved = false;
   bool _requiresResumeConfirmation = false;
   String? _errorMessage;
   Channel? _channel;
@@ -82,6 +91,10 @@ class _LiveHostPageState extends State<LiveHostPage> {
   @override
   void dispose() {
     _channelTitleController.dispose();
+    _fieldTestFailureStepController.dispose();
+    _fieldTestExpectedResultController.dispose();
+    _fieldTestActualResultController.dispose();
+    _fieldTestReproductionStepsController.dispose();
     _stopCuePolling();
     _statusTicker?.cancel();
     unawaited(_cueSpeaker.stop());
@@ -284,6 +297,19 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           snapshot: _fieldTestModeSnapshot,
                           active: _fieldTestModeActive,
                           lastSummary: _lastFieldTestSummary,
+                          memo: _fieldTestResultMemo,
+                          failureStepController:
+                              _fieldTestFailureStepController,
+                          expectedResultController:
+                              _fieldTestExpectedResultController,
+                          actualResultController:
+                              _fieldTestActualResultController,
+                          reproductionStepsController:
+                              _fieldTestReproductionStepsController,
+                          sensitiveInfoRemoved: _fieldTestSensitiveInfoRemoved,
+                          onSensitiveInfoRemovedChanged:
+                              _setFieldTestSensitiveInfoRemoved,
+                          onMemoChanged: _refreshFieldTestMemoPreview,
                           onStart: _startFieldTestMode,
                           onEnd: _endFieldTestMode,
                           onDismissSummary: _dismissFieldTestSummary,
@@ -441,6 +467,16 @@ class _LiveHostPageState extends State<LiveHostPage> {
     );
   }
 
+  FieldTestResultMemo get _fieldTestResultMemo {
+    return FieldTestResultMemo.fromInput(
+      failureStep: _fieldTestFailureStepController.text,
+      expectedResult: _fieldTestExpectedResultController.text,
+      actualResult: _fieldTestActualResultController.text,
+      reproductionSteps: _fieldTestReproductionStepsController.text,
+      sensitiveInfoRemoved: _fieldTestSensitiveInfoRemoved,
+    );
+  }
+
   String get _fieldTestAiAssistStatusLabel {
     if (!_canUseAiVisionAssist) {
       return '전방 카메라 필요';
@@ -509,6 +545,15 @@ class _LiveHostPageState extends State<LiveHostPage> {
   void _clearFieldTestModeState() {
     _fieldTestModeActive = false;
     _lastFieldTestSummary = null;
+    _clearFieldTestMemo();
+  }
+
+  void _clearFieldTestMemo() {
+    _fieldTestFailureStepController.clear();
+    _fieldTestExpectedResultController.clear();
+    _fieldTestActualResultController.clear();
+    _fieldTestReproductionStepsController.clear();
+    _fieldTestSensitiveInfoRemoved = false;
   }
 
   void _startFieldTestMode() {
@@ -529,12 +574,24 @@ class _LiveHostPageState extends State<LiveHostPage> {
     setState(() {
       _fieldTestModeActive = false;
       _lastFieldTestSummary = _fieldTestModeSnapshot.toSummary();
+      _clearFieldTestMemo();
       _errorMessage = null;
     });
   }
 
   void _dismissFieldTestSummary() {
-    setState(() => _lastFieldTestSummary = null);
+    setState(() {
+      _lastFieldTestSummary = null;
+      _clearFieldTestMemo();
+    });
+  }
+
+  void _setFieldTestSensitiveInfoRemoved(bool checked) {
+    setState(() => _fieldTestSensitiveInfoRemoved = checked);
+  }
+
+  void _refreshFieldTestMemoPreview() {
+    setState(() {});
   }
 
   Future<void> _createChannel() async {
@@ -2309,6 +2366,14 @@ class _FieldTestModePanel extends StatelessWidget {
     required this.snapshot,
     required this.active,
     required this.lastSummary,
+    required this.memo,
+    required this.failureStepController,
+    required this.expectedResultController,
+    required this.actualResultController,
+    required this.reproductionStepsController,
+    required this.sensitiveInfoRemoved,
+    required this.onSensitiveInfoRemovedChanged,
+    required this.onMemoChanged,
     required this.onStart,
     required this.onEnd,
     required this.onDismissSummary,
@@ -2318,6 +2383,14 @@ class _FieldTestModePanel extends StatelessWidget {
   final FieldTestModeSnapshot snapshot;
   final bool active;
   final FieldTestModeSummary? lastSummary;
+  final FieldTestResultMemo memo;
+  final TextEditingController failureStepController;
+  final TextEditingController expectedResultController;
+  final TextEditingController actualResultController;
+  final TextEditingController reproductionStepsController;
+  final bool sensitiveInfoRemoved;
+  final ValueChanged<bool> onSensitiveInfoRemovedChanged;
+  final VoidCallback onMemoChanged;
   final VoidCallback onStart;
   final VoidCallback onEnd;
   final VoidCallback onDismissSummary;
@@ -2350,6 +2423,14 @@ class _FieldTestModePanel extends StatelessWidget {
               const SizedBox(height: 12),
               _FieldTestModeSummaryView(
                 summary: lastSummary!,
+                memo: memo,
+                failureStepController: failureStepController,
+                expectedResultController: expectedResultController,
+                actualResultController: actualResultController,
+                reproductionStepsController: reproductionStepsController,
+                sensitiveInfoRemoved: sensitiveInfoRemoved,
+                onSensitiveInfoRemovedChanged: onSensitiveInfoRemovedChanged,
+                onMemoChanged: onMemoChanged,
                 onDismiss: onDismissSummary,
               ),
             ],
@@ -2477,10 +2558,26 @@ class _ActiveFieldTestModeSummary extends StatelessWidget {
 class _FieldTestModeSummaryView extends StatelessWidget {
   const _FieldTestModeSummaryView({
     required this.summary,
+    required this.memo,
+    required this.failureStepController,
+    required this.expectedResultController,
+    required this.actualResultController,
+    required this.reproductionStepsController,
+    required this.sensitiveInfoRemoved,
+    required this.onSensitiveInfoRemovedChanged,
+    required this.onMemoChanged,
     required this.onDismiss,
   });
 
   final FieldTestModeSummary summary;
+  final FieldTestResultMemo memo;
+  final TextEditingController failureStepController;
+  final TextEditingController expectedResultController;
+  final TextEditingController actualResultController;
+  final TextEditingController reproductionStepsController;
+  final bool sensitiveInfoRemoved;
+  final ValueChanged<bool> onSensitiveInfoRemovedChanged;
+  final VoidCallback onMemoChanged;
   final VoidCallback onDismiss;
 
   @override
@@ -2502,9 +2599,118 @@ class _FieldTestModeSummaryView extends StatelessWidget {
           _FieldTestModeStatusLine(label: row.label, value: row.value),
           const SizedBox(height: 4),
         ],
+        const SizedBox(height: 12),
+        Text('테스트 결과 메모', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Text(
+          '운영상 필요한 사실만 적으세요. 정확한 장소, 링크, 코드, 채팅 원문, 사람 얼굴/차량번호 설명은 적지 마세요.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 8),
+        _FieldTestMemoTextField(
+          controller: failureStepController,
+          label: '실패 단계',
+          hint: '예: 가이드 흐름 확인',
+          onChanged: onMemoChanged,
+        ),
+        _FieldTestMemoTextField(
+          controller: expectedResultController,
+          label: '기대 결과',
+          hint: '예: 짧은 채팅 TTS가 들림',
+          onChanged: onMemoChanged,
+        ),
+        _FieldTestMemoTextField(
+          controller: actualResultController,
+          label: '실제 결과',
+          hint: '예: TTS가 들리지 않음',
+          onChanged: onMemoChanged,
+        ),
+        _FieldTestMemoTextField(
+          controller: reproductionStepsController,
+          label: '재현 순서',
+          hint: '예: 라이브 연결 후 짧은 테스트 메시지 전송',
+          onChanged: onMemoChanged,
+          minLines: 2,
+        ),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('민감정보 제거 확인'),
+          subtitle: const Text('링크, 코드, 채팅 원문, 카메라 원본, 위치 정보, 연락처를 적지 않았습니다.'),
+          value: sensitiveInfoRemoved,
+          onChanged: (value) => onSensitiveInfoRemovedChanged(value ?? false),
+        ),
+        Text(
+          memo.safetyStatusLabel,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: memo.sensitiveInfoRemoved
+                    ? colorScheme.primary
+                    : colorScheme.error,
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+        if (memo.lengthNotice != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            memo.lengthNotice!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFB45309),
+                ),
+          ),
+        ],
+        if (!memo.isEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            memo.isReadyForLocalReview
+                ? '메모가 화면에만 보관됩니다.'
+                : '민감정보 제거 확인을 체크해야 합니다.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: memo.isReadyForLocalReview
+                      ? colorScheme.onSurfaceVariant
+                      : colorScheme.error,
+                ),
+          ),
+        ],
         const SizedBox(height: 8),
         TextButton(onPressed: onDismiss, child: const Text('요약 닫기')),
       ],
+    );
+  }
+}
+
+class _FieldTestMemoTextField extends StatelessWidget {
+  const _FieldTestMemoTextField({
+    required this.controller,
+    required this.label,
+    required this.hint,
+    required this.onChanged,
+    this.minLines = 1,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final String hint;
+  final VoidCallback onChanged;
+  final int minLines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextField(
+        controller: controller,
+        minLines: minLines,
+        maxLines: minLines + 1,
+        maxLength: FieldTestResultMemo.maxFieldLength,
+        onChanged: (_) => onChanged(),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          helperText: '운영 사실만 입력',
+          border: const OutlineInputBorder(),
+        ),
+      ),
     );
   }
 }
