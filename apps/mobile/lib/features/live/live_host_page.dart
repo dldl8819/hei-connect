@@ -29,6 +29,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   late final LiveWebRtcController _webRtc;
   late final AiVisionAssistController _aiAssist;
   Timer? _cuePollTimer;
+  Timer? _statusTicker;
 
   bool _isLive = false;
   bool _isCreating = false;
@@ -43,6 +44,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
   Channel? _channel;
   LiveSession? _session;
   SignalState? _signalState;
+  DateTime _statusNow = DateTime.now();
+  AiHazardDecision? _lastAiVerificationDecision;
   final Set<_PreRunChecklistItem> _confirmedPreRunItems =
       <_PreRunChecklistItem>{};
   List<GuidanceCueEvent> _recentCueEvents = const [];
@@ -62,12 +65,18 @@ class _LiveHostPageState extends State<LiveHostPage> {
     );
     _webRtc.addListener(_handleWebRtcChanged);
     unawaited(_cueSpeaker.initialize());
+    _statusTicker = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) {
+        setState(() => _statusNow = DateTime.now());
+      }
+    });
   }
 
   @override
   void dispose() {
     _channelTitleController.dispose();
     _stopCuePolling();
+    _statusTicker?.cancel();
     unawaited(_cueSpeaker.stop());
     unawaited(_screenAwake.allowSleep());
     _aiAssist.dispose();
@@ -171,7 +180,9 @@ class _LiveHostPageState extends State<LiveHostPage> {
                       canUse: _canUseAiVisionAssist,
                       isLive: _isLive,
                       controller: _aiAssist,
+                      now: _statusNow,
                       verificationModeEnabled: _aiVisionVerificationMode,
+                      verificationDecision: _lastAiVerificationDecision,
                       onEnabledChanged: _setAiAssistEnabled,
                       onVerificationModeChanged: _setAiVisionVerificationMode,
                       onAnalyzeNow: _isLive &&
@@ -233,6 +244,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           aiVerificationMode: _aiVisionVerificationMode,
                           canUseAiVisionAssist: _canUseAiVisionAssist,
                           aiController: _aiAssist,
+                          now: _statusNow,
+                          verificationDecision: _lastAiVerificationDecision,
                         );
                       },
                     );
@@ -751,6 +764,12 @@ class _LiveHostPageState extends State<LiveHostPage> {
       objects: const [],
       decidedAt: DateTime.now(),
     );
+    if (mounted) {
+      setState(() {
+        _statusNow = decision.decidedAt;
+        _lastAiVerificationDecision = decision;
+      });
+    }
     return _applyAiVisionDecision(decision);
   }
 
@@ -1081,7 +1100,9 @@ class _AiVisionAssistPanel extends StatelessWidget {
     required this.canUse,
     required this.isLive,
     required this.controller,
+    required this.now,
     required this.verificationModeEnabled,
+    required this.verificationDecision,
     required this.onEnabledChanged,
     required this.onVerificationModeChanged,
     required this.onAnalyzeNow,
@@ -1093,7 +1114,9 @@ class _AiVisionAssistPanel extends StatelessWidget {
   final bool canUse;
   final bool isLive;
   final AiVisionAssistController controller;
+  final DateTime now;
   final bool verificationModeEnabled;
+  final AiHazardDecision? verificationDecision;
   final ValueChanged<bool> onEnabledChanged;
   final ValueChanged<bool> onVerificationModeChanged;
   final VoidCallback? onAnalyzeNow;
@@ -1103,13 +1126,17 @@ class _AiVisionAssistPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final decision = controller.lastDecision;
+    final visibleDecision =
+        verificationModeEnabled ? verificationDecision : decision;
     final colorScheme = Theme.of(context).colorScheme;
-    final statusColor = switch (decision?.level) {
+    final statusColor = switch (visibleDecision?.level) {
       AiHazardLevel.stop => colorScheme.error,
       AiHazardLevel.caution => const Color(0xFFB45309),
       AiHazardLevel.clear => colorScheme.primary,
       null => colorScheme.onSurfaceVariant,
     };
+    final decisionIsStale =
+        !verificationModeEnabled && decision != null && decision.isStaleAt(now);
     final objectSummary = decision == null || decision.objects.isEmpty
         ? null
         : decision.objects
@@ -1135,18 +1162,50 @@ class _AiVisionAssistPanel extends StatelessWidget {
               value: enabled,
               onChanged: canUse ? onEnabledChanged : null,
             ),
-            if (decision != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                '${decision.level.label} · ${decision.reason}',
-                style: TextStyle(
-                  color: statusColor,
-                  fontWeight: FontWeight.w700,
-                ),
+            if (enabled) ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _AiStatusBadge(
+                    icon: verificationModeEnabled
+                        ? Icons.science
+                        : Icons.camera_alt,
+                    label: verificationModeEnabled ? '검증 모드' : '실제 분석 모드',
+                    color: verificationModeEnabled
+                        ? const Color(0xFFB45309)
+                        : colorScheme.primary,
+                  ),
+                  if (visibleDecision != null)
+                    _AiStatusBadge(
+                      icon: Icons.schedule,
+                      label:
+                          '${verificationModeEnabled ? '최근 검증' : '최근 판단'} ${visibleDecision.ageLabelAt(now)}',
+                      color: decisionIsStale
+                          ? const Color(0xFFB45309)
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                  if (decisionIsStale)
+                    const _AiStatusBadge(
+                      icon: Icons.warning_amber,
+                      label: '판단 오래됨',
+                      color: Color(0xFFB45309),
+                    ),
+                ],
               ),
-              if (objectSummary != null) ...[
-                const SizedBox(height: 4),
-                Text('감지: $objectSummary'),
+              if (visibleDecision != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '${visibleDecision.level.label} · ${visibleDecision.reason}',
+                  style: TextStyle(
+                    color: statusColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (!verificationModeEnabled && objectSummary != null) ...[
+                  const SizedBox(height: 4),
+                  Text('감지: $objectSummary'),
+                ],
               ],
             ],
             if (controller.errorMessage != null) ...[
@@ -1206,7 +1265,7 @@ class _AiVisionAssistPanel extends StatelessWidget {
       return '카메라 영상에서 가까운 물체를 감지하면 음성으로 알려줍니다.';
     }
     if (verificationModeEnabled) {
-      return '검증 모드입니다. 카메라 분석은 멈추고 안내 흐름만 확인합니다.';
+      return '검증 모드입니다. 카메라 분석 없이 큐 흐름만 확인합니다.';
     }
     if (controller.isAnalyzing) {
       return '분석 중';
@@ -1215,6 +1274,45 @@ class _AiVisionAssistPanel extends StatelessWidget {
       return '실시간 보조 중';
     }
     return '라이브 시작 후 자동으로 동작합니다.';
+  }
+}
+
+class _AiStatusBadge extends StatelessWidget {
+  const _AiStatusBadge({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 16),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -1253,6 +1351,8 @@ class _FieldTestStatusPanel extends StatelessWidget {
     required this.aiVerificationMode,
     required this.canUseAiVisionAssist,
     required this.aiController,
+    required this.now,
+    required this.verificationDecision,
   });
 
   final LiveSession? session;
@@ -1269,6 +1369,8 @@ class _FieldTestStatusPanel extends StatelessWidget {
   final bool aiVerificationMode;
   final bool canUseAiVisionAssist;
   final AiVisionAssistController aiController;
+  final DateTime now;
+  final AiHazardDecision? verificationDecision;
 
   @override
   Widget build(BuildContext context) {
@@ -1431,7 +1533,10 @@ class _FieldTestStatusPanel extends StatelessWidget {
       return '꺼짐';
     }
     if (aiVerificationMode) {
-      return '검증 모드';
+      final decision = verificationDecision;
+      return decision == null
+          ? '검증 모드 대기'
+          : '검증 ${decision.level.label} ${decision.ageLabelAt(now)}';
     }
     final errorMessage = aiController.errorMessage;
     if (errorMessage != null) {
@@ -1442,7 +1547,12 @@ class _FieldTestStatusPanel extends StatelessWidget {
     }
     if (aiController.isRunning) {
       final decision = aiController.lastDecision;
-      return decision == null ? '실시간 보조' : '최근 ${decision.level.label}';
+      if (decision == null) {
+        return '실시간 보조';
+      }
+
+      final freshnessLabel = decision.isStaleAt(now) ? '오래된 판단' : '최근 판단';
+      return '$freshnessLabel ${decision.level.label} ${decision.ageLabelAt(now)}';
     }
     return isLive ? '대기' : '라이브 후 대기';
   }
@@ -1458,6 +1568,10 @@ class _FieldTestStatusPanel extends StatelessWidget {
       return _FieldTestStatusState.warning;
     }
     if (aiController.errorMessage != null) {
+      return _FieldTestStatusState.warning;
+    }
+    final decision = aiController.lastDecision;
+    if (decision != null && decision.isStaleAt(now)) {
       return _FieldTestStatusState.warning;
     }
     if (aiController.isRunning) {

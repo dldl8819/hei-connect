@@ -73,4 +73,40 @@ void main() {
 
     expect(decision.level, AiHazardLevel.clear);
   });
+
+  test('labels fresh and stale AI decisions by age', () {
+    final decidedAt = DateTime(2026, 1, 1, 9);
+    final decision = AiHazardDecision.clear(decidedAt: decidedAt);
+
+    expect(
+      decision.isStaleAt(decidedAt.add(const Duration(seconds: 9))),
+      isFalse,
+    );
+    expect(
+      decision.isStaleAt(decidedAt.add(const Duration(seconds: 11))),
+      isTrue,
+    );
+    expect(
+      decision.ageLabelAt(decidedAt.add(const Duration(seconds: 3))),
+      '3초 전',
+    );
+    expect(
+      decision.ageLabelAt(decidedAt.add(const Duration(minutes: 2))),
+      '2분 전',
+    );
+  });
+
+  test('does not report negative age when device time moves backwards', () {
+    final decidedAt = DateTime(2026, 1, 1, 9);
+    final decision = AiHazardDecision.clear(decidedAt: decidedAt);
+
+    expect(
+      decision.ageAt(decidedAt.subtract(const Duration(seconds: 5))),
+      Duration.zero,
+    );
+    expect(
+      decision.ageLabelAt(decidedAt.subtract(const Duration(seconds: 5))),
+      '방금',
+    );
+  });
 }

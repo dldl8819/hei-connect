@@ -1,5 +1,7 @@
 import '../../core/safety/voice_cues.dart';
 
+const aiDecisionFreshnessWindow = Duration(seconds: 10);
+
 enum AiHazardLevel {
   clear,
   caution,
@@ -64,6 +66,32 @@ class AiHazardDecision {
 
   bool get shouldSpeak => level != AiHazardLevel.clear;
   bool get shouldPauseRunner => level == AiHazardLevel.stop;
+
+  Duration ageAt(DateTime now) {
+    final age = now.difference(decidedAt);
+    return age.isNegative ? Duration.zero : age;
+  }
+
+  bool isStaleAt(
+    DateTime now, {
+    Duration maxAge = aiDecisionFreshnessWindow,
+  }) {
+    return ageAt(now) > maxAge;
+  }
+
+  String ageLabelAt(DateTime now) {
+    final age = ageAt(now);
+    if (age.inSeconds < 2) {
+      return '방금';
+    }
+    if (age.inMinutes < 1) {
+      return '${age.inSeconds}초 전';
+    }
+    if (age.inHours < 1) {
+      return '${age.inMinutes}분 전';
+    }
+    return '${age.inHours}시간 전';
+  }
 
   factory AiHazardDecision.clear({
     List<AiDetectedObject> objects = const [],
