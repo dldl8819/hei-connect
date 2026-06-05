@@ -1335,6 +1335,20 @@ class _FieldTestStatusItem {
   final _FieldTestStatusState state;
 }
 
+class _FieldTestNextAction {
+  const _FieldTestNextAction({
+    required this.title,
+    required this.detail,
+    required this.icon,
+    required this.state,
+  });
+
+  final String title;
+  final String detail;
+  final IconData icon;
+  final _FieldTestStatusState state;
+}
+
 class _FieldTestStatusPanel extends StatelessWidget {
   const _FieldTestStatusPanel({
     required this.session,
@@ -1425,6 +1439,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
             : _FieldTestStatusState.ready,
       ),
     ];
+    final nextAction = _nextAction;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1449,18 +1464,46 @@ class _FieldTestStatusPanel extends StatelessWidget {
             ],
             DecoratedBox(
               decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest,
+                color: _stateColor(context, nextAction.state).withValues(
+                  alpha: 0.08,
+                ),
+                border: Border.all(
+                  color: _stateColor(context, nextAction.state),
+                ),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Padding(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(12),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.task_alt, size: 18),
-                    const SizedBox(width: 8),
+                    Icon(
+                      nextAction.icon,
+                      color: _stateColor(context, nextAction.state),
+                      size: 22,
+                    ),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: Text('다음 확인: $_nextStep'),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '다음 조작: ${nextAction.title}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: _stateColor(
+                                    context,
+                                    nextAction.state,
+                                  ),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(nextAction.detail),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1580,35 +1623,107 @@ class _FieldTestStatusPanel extends StatelessWidget {
     return _FieldTestStatusState.pending;
   }
 
-  String get _nextStep {
+  _FieldTestNextAction get _nextAction {
     final sessionPurpose = session?.purpose ?? purpose;
     final sessionSourceMode = session?.sourceMode ?? sourceMode;
 
+    if (requiresResumeConfirmation) {
+      return const _FieldTestNextAction(
+        title: '안전 확인 후 재개 버튼',
+        detail: '러너가 멈췄고 카메라와 오디오가 안정적인 상태에서만 재개합니다.',
+        icon: Icons.restart_alt,
+        state: _FieldTestStatusState.blocked,
+      );
+    }
     if (sessionPurpose != LiveSessionPurpose.runningGuide) {
-      return '방 종류를 러닝 가이드로 선택';
+      return const _FieldTestNextAction(
+        title: '방 종류에서 러닝 가이드 선택',
+        detail: '러닝 테스트는 러닝 가이드 방에서만 진행합니다.',
+        icon: Icons.directions_run,
+        state: _FieldTestStatusState.pending,
+      );
     }
     if (sessionSourceMode != LiveSourceMode.worldCamera) {
-      return '방송 소스를 눈앞 카메라로 변경';
+      return const _FieldTestNextAction(
+        title: '방송 소스에서 눈앞 카메라 선택',
+        detail: '가이드와 AI 보조가 전방 화면을 확인할 수 있어야 합니다.',
+        icon: Icons.camera_alt,
+        state: _FieldTestStatusState.pending,
+      );
     }
     if (!preRunChecklistComplete) {
-      return '러닝 전 안전 체크 완료';
+      return const _FieldTestNextAction(
+        title: '러닝 전 안전 체크 완료',
+        detail: '통제 경로, 백업 동행자, 카메라 각도, 오디오를 먼저 확인합니다.',
+        icon: Icons.checklist,
+        state: _FieldTestStatusState.pending,
+      );
     }
     if (session == null) {
-      return '라이브 세션 생성';
+      return const _FieldTestNextAction(
+        title: '라이브 세션 생성 버튼',
+        detail: '세션을 만든 뒤 가이드가 참여할 수 있습니다.',
+        icon: Icons.add_circle_outline,
+        state: _FieldTestStatusState.pending,
+      );
     }
     if (!isLive) {
-      return '정지 상태에서 라이브 시작';
+      return const _FieldTestNextAction(
+        title: '라이브 시작 버튼',
+        detail: '러너는 정지한 상태에서 카메라와 마이크 권한을 허용합니다.',
+        icon: Icons.play_circle,
+        state: _FieldTestStatusState.pending,
+      );
     }
     if (webRtcPhase != WebRtcPhase.connected) {
-      return '가이드 참여 후 WebRTC 연결 확인';
+      return const _FieldTestNextAction(
+        title: '가이드 참여 후 신호 새로고침',
+        detail: '가이드 기기에서 참여한 뒤 WebRTC가 연결됨으로 바뀌는지 확인합니다.',
+        icon: Icons.sync,
+        state: _FieldTestStatusState.warning,
+      );
     }
-    if (aiAssistEnabled && aiVerificationMode) {
-      return '감속 큐와 정지 큐를 순서대로 테스트';
+    if (!aiAssistEnabled) {
+      return const _FieldTestNextAction(
+        title: 'AI 보조 안내 스위치',
+        detail: '먼저 음성 안내와 정지 흐름을 확인한 뒤 AI 보조를 켭니다.',
+        icon: Icons.visibility,
+        state: _FieldTestStatusState.pending,
+      );
     }
-    if (aiAssistEnabled) {
-      return '정지 상태에서 안전한 테스트 물체로 AI 분석 확인';
+    if (aiVerificationMode) {
+      return const _FieldTestNextAction(
+        title: '감속 큐 테스트, 정지 큐 테스트',
+        detail: '검증 모드는 카메라 분석 없이 TTS와 일시정지 흐름만 확인합니다.',
+        icon: Icons.science,
+        state: _FieldTestStatusState.warning,
+      );
     }
-    return '음성 안내, 채팅 TTS, 정지 후 재개 흐름 확인';
+    final decision = aiController.lastDecision;
+    if (decision == null || decision.isStaleAt(now)) {
+      return const _FieldTestNextAction(
+        title: '지금 분석 버튼',
+        detail: '러너를 정지시킨 뒤 안전한 테스트 물체로 실제 분석 상태를 확인합니다.',
+        icon: Icons.refresh,
+        state: _FieldTestStatusState.warning,
+      );
+    }
+    return const _FieldTestNextAction(
+      title: '정지와 재개 흐름 확인',
+      detail: '연결 손실, 정지 큐, 안전 확인 후 재개가 예상대로 동작하는지 확인합니다.',
+      icon: Icons.task_alt,
+      state: _FieldTestStatusState.ready,
+    );
+  }
+
+  Color _stateColor(BuildContext context, _FieldTestStatusState state) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return switch (state) {
+      _FieldTestStatusState.ready => colorScheme.primary,
+      _FieldTestStatusState.pending => colorScheme.onSurfaceVariant,
+      _FieldTestStatusState.warning => const Color(0xFFB45309),
+      _FieldTestStatusState.blocked => colorScheme.error,
+    };
   }
 }
 
