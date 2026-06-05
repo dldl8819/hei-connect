@@ -15,6 +15,33 @@ routes.
 - Use a short test session first, then increase distance only after repeated
   stable results.
 
+## APK Build And Install
+
+From the repository root:
+
+```powershell
+.\scripts\flutter-mobile.cmd build apk --debug --no-pub
+adb devices
+adb install -r apps\mobile\build\app\outputs\flutter-apk\app-debug.apk
+```
+
+If `adb` is not on `PATH`, use the Android SDK `platform-tools` `adb.exe`.
+Install only the debug APK built from the current branch. Do not distribute it
+outside the test group.
+
+## Recommended Test Order
+
+1. Install the APK and open the app.
+2. Choose host mode and create a running-guide session.
+3. Select the runner vision mode being tested.
+4. Confirm every pre-run checklist item.
+5. Start live media and grant camera and microphone permissions.
+6. Join from a second device using the session code or link.
+7. Confirm WebRTC video, supporter voice, cue buttons, and chat TTS.
+8. Run AI verification mode while stationary.
+9. Run AI camera analysis while stationary with a safe test object.
+10. Test connection loss, stop cue, and resume confirmation.
+
 ## Before Starting Live
 
 - Create a running-guide session.
@@ -24,6 +51,8 @@ routes.
 - Confirm speaker or earphone output is loud enough.
 - Confirm long-press emergency stop is understood by the tester.
 - Confirm the supporter can join with the session code or link.
+- Confirm the in-app field test status panel shows the controlled route and
+  backup-person checks as ready before live movement.
 
 ## WebRTC And Guide Flow
 
@@ -39,6 +68,8 @@ routes.
 
 - Enable AI assist in running-guide world-camera mode.
 - Enable verification mode.
+- Keep the runner stationary. Verification mode checks the cue flow only and
+  does not analyze camera frames.
 - Press the slow-down cue test and confirm:
   - TTS speaks the slow-down verification message.
   - The recent cue list receives a system slow-down cue.
@@ -48,6 +79,8 @@ routes.
   - The session safety state moves to stop.
   - The session pauses and requires resume confirmation.
   - AI analysis stops until the runner confirms resume.
+- Record whether the in-app field test status panel shows resume confirmation
+  as required after the stop cue.
 
 ## AI Camera Analysis
 
@@ -58,6 +91,25 @@ routes.
 - Confirm AI assist gives a slow-down or stop cue.
 - Remove the object and confirm the runner can resume only after safety
   confirmation if a stop cue occurred.
+
+## Failure Record
+
+When a test fails, record only operational facts:
+
+- Test step.
+- Device model and Android version.
+- App build source: current branch debug APK.
+- Network type: Wi-Fi, mobile data, or hotspot.
+- Runner mode and source mode.
+- Expected result and actual result.
+- WebRTC phase shown in the app.
+- AI assist state shown in the app.
+- Whether resume confirmation was required.
+- Permission prompt or visible error message, with sensitive details removed.
+- Short reproduction steps.
+
+Do not record exact locations, contact details, session links, chat text,
+camera frames, screenshots containing people, or any credentials.
 
 ## Failure Cases
 
