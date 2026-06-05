@@ -46,7 +46,11 @@ the MVP scope.
 
 Operational safety documents:
 
+- `docs/ANDROID_FIRST_FIELD_TEST_GUIDE.md` for the first Android button-order
+  field test.
 - `docs/ANDROID_FIELD_TEST_CHECKLIST.md` for controlled Android field tests.
+- `docs/ANDROID_FIELD_TEST_REPORT_TEMPLATE.md` for written Android test
+  reports.
 - `docs/MVP_SAFETY_BOUNDARIES.md` for MVP allow/block decisions.
 - `docs/SAFETY_PROTOCOL.md` for stop, connection-loss, and AI assist behavior.
 

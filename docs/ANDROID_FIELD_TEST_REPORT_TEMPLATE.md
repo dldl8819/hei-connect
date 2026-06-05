@@ -15,6 +15,7 @@ crowded races, night runs, or unknown routes.
 
 ## Test Metadata
 
+- Test guide used: `docs/ANDROID_FIRST_FIELD_TEST_GUIDE.md` / other
 - Test date:
 - App build source: current branch debug APK
 - Tester role:
@@ -82,6 +83,5 @@ Complete this section only for failed or unclear steps.
 
 - Continue same test plan: yes / no
 - Retest needed before movement: yes / no
-- Safe to increase distance within a controlled route: yes / no
+- Increase distance within controlled route with backup person: yes / no
 - Blocked reason:
-

@@ -6,6 +6,8 @@ routes.
 
 ## Test Setup
 
+- Use `docs/ANDROID_FIRST_FIELD_TEST_GUIDE.md` for the first full button-by-
+  button Android test.
 - Use a controlled track or closed route.
 - Keep a sighted backup person physically near the runner.
 - Use open-ear audio or a single-ear output that does not block ambient sound.
@@ -112,6 +114,8 @@ Do not record exact locations, contact details, session links, chat text,
 camera frames, screenshots containing people, or any credentials.
 
 Use `docs/ANDROID_FIELD_TEST_REPORT_TEMPLATE.md` for the written test report.
+Use `docs/ANDROID_FIRST_FIELD_TEST_GUIDE.md` when the tester needs the exact
+button order.
 
 ## Failure Cases
 
