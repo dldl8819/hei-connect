@@ -33,6 +33,9 @@ Cross-platform mobile app skeleton for accessibility-first live sessions.
 - Optional on-device AI assist for running-guide rooms. It samples the
   world-facing camera stream, runs ML Kit object detection, and speaks a
   slow-down or stop cue when the detected object geometry looks risky.
+- Host-side field test status panel for running-guide rooms. It summarizes
+  checklist readiness, live/WebRTC state, AI assist state, and resume
+  confirmation without storing raw camera frames, chat text, or personal data.
 - In-app route handling for shared live links and channel links.
 - Android and iOS native permission declarations for camera and microphone.
 - Screen-awake bridge while host or supporter media is connected.

@@ -209,6 +209,36 @@ class _LiveHostPageState extends State<LiveHostPage> {
                   },
                 ),
               ],
+              if (_showsPreRunChecklist) ...[
+                const SizedBox(height: 16),
+                AnimatedBuilder(
+                  animation: _webRtc,
+                  builder: (context, _) {
+                    return AnimatedBuilder(
+                      animation: _aiAssist,
+                      builder: (context, _) {
+                        return _FieldTestStatusPanel(
+                          session: _session,
+                          purpose: _purpose,
+                          sourceMode: _sourceMode,
+                          runnerVisionMode: _runnerVisionMode,
+                          isCreating: _isCreating,
+                          isStartingMedia: _isStartingMedia,
+                          isLive: _isLive,
+                          preRunChecklistComplete: _isPreRunChecklistComplete,
+                          requiresResumeConfirmation:
+                              _requiresResumeConfirmation,
+                          webRtcPhase: _webRtc.phase,
+                          aiAssistEnabled: _aiAssistEnabled,
+                          aiVerificationMode: _aiVisionVerificationMode,
+                          canUseAiVisionAssist: _canUseAiVisionAssist,
+                          aiController: _aiAssist,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ],
               const SizedBox(height: 16),
               _ChannelPanel(
                 controller: _channelTitleController,
@@ -1185,6 +1215,339 @@ class _AiVisionAssistPanel extends StatelessWidget {
       return '실시간 보조 중';
     }
     return '라이브 시작 후 자동으로 동작합니다.';
+  }
+}
+
+enum _FieldTestStatusState {
+  ready,
+  pending,
+  warning,
+  blocked,
+}
+
+class _FieldTestStatusItem {
+  const _FieldTestStatusItem({
+    required this.label,
+    required this.value,
+    required this.state,
+  });
+
+  final String label;
+  final String value;
+  final _FieldTestStatusState state;
+}
+
+class _FieldTestStatusPanel extends StatelessWidget {
+  const _FieldTestStatusPanel({
+    required this.session,
+    required this.purpose,
+    required this.sourceMode,
+    required this.runnerVisionMode,
+    required this.isCreating,
+    required this.isStartingMedia,
+    required this.isLive,
+    required this.preRunChecklistComplete,
+    required this.requiresResumeConfirmation,
+    required this.webRtcPhase,
+    required this.aiAssistEnabled,
+    required this.aiVerificationMode,
+    required this.canUseAiVisionAssist,
+    required this.aiController,
+  });
+
+  final LiveSession? session;
+  final LiveSessionPurpose purpose;
+  final LiveSourceMode sourceMode;
+  final RunnerVisionMode runnerVisionMode;
+  final bool isCreating;
+  final bool isStartingMedia;
+  final bool isLive;
+  final bool preRunChecklistComplete;
+  final bool requiresResumeConfirmation;
+  final WebRtcPhase webRtcPhase;
+  final bool aiAssistEnabled;
+  final bool aiVerificationMode;
+  final bool canUseAiVisionAssist;
+  final AiVisionAssistController aiController;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final sessionPurpose = session?.purpose ?? purpose;
+    final sessionSourceMode = session?.sourceMode ?? sourceMode;
+    final sessionRunnerMode = session?.runnerVisionMode ?? runnerVisionMode;
+    final runningGuideReady =
+        sessionPurpose == LiveSessionPurpose.runningGuide &&
+            sessionSourceMode == LiveSourceMode.worldCamera &&
+            preRunChecklistComplete;
+    final items = <_FieldTestStatusItem>[
+      _FieldTestStatusItem(
+        label: '안전 기준',
+        value: runningGuideReady ? '통제 경로 + 백업 확인' : '체크리스트 완료 필요',
+        state: runningGuideReady
+            ? _FieldTestStatusState.ready
+            : _FieldTestStatusState.pending,
+      ),
+      _FieldTestStatusItem(
+        label: '러너 모드',
+        value: sessionRunnerMode.label,
+        state: _FieldTestStatusState.ready,
+      ),
+      _FieldTestStatusItem(
+        label: '세션',
+        value: session != null ? '생성됨' : (isCreating ? '생성 중' : '아직 없음'),
+        state: session != null
+            ? _FieldTestStatusState.ready
+            : _FieldTestStatusState.pending,
+      ),
+      _FieldTestStatusItem(
+        label: '라이브',
+        value: _liveStatusLabel,
+        state: _liveStatusState,
+      ),
+      _FieldTestStatusItem(
+        label: 'WebRTC',
+        value: webRtcPhase.label,
+        state: _webRtcStatusState,
+      ),
+      _FieldTestStatusItem(
+        label: 'AI 보조',
+        value: _aiStatusLabel,
+        state: _aiStatusState,
+      ),
+      _FieldTestStatusItem(
+        label: '재개 확인',
+        value: requiresResumeConfirmation ? '필요' : '정상',
+        state: requiresResumeConfirmation
+            ? _FieldTestStatusState.blocked
+            : _FieldTestStatusState.ready,
+      ),
+    ];
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('현장 테스트 상태', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              '통제 경로 + 백업 동행자 기준으로만 확인합니다.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            for (final item in items) ...[
+              _FieldTestStatusRow(item: item),
+              const SizedBox(height: 8),
+            ],
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.task_alt, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text('다음 확인: $_nextStep'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '상태는 화면에만 표시하며 원본 카메라, 채팅 원문, 개인 정보는 저장하지 않습니다.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String get _liveStatusLabel {
+    if (requiresResumeConfirmation) {
+      return '정지 후 확인 필요';
+    }
+    if (isStartingMedia) {
+      return '연결 준비';
+    }
+    if (isLive) {
+      return '송출 중';
+    }
+    if (session?.status == LiveSessionStatus.paused) {
+      return '일시정지';
+    }
+    return '대기';
+  }
+
+  _FieldTestStatusState get _liveStatusState {
+    if (requiresResumeConfirmation) {
+      return _FieldTestStatusState.blocked;
+    }
+    if (isLive) {
+      return _FieldTestStatusState.ready;
+    }
+    if (isStartingMedia) {
+      return _FieldTestStatusState.pending;
+    }
+    if (session?.status == LiveSessionStatus.paused) {
+      return _FieldTestStatusState.warning;
+    }
+    return _FieldTestStatusState.pending;
+  }
+
+  _FieldTestStatusState get _webRtcStatusState {
+    return switch (webRtcPhase) {
+      WebRtcPhase.connected => _FieldTestStatusState.ready,
+      WebRtcPhase.connectionLost ||
+      WebRtcPhase.failed =>
+        _FieldTestStatusState.blocked,
+      WebRtcPhase.closed => _FieldTestStatusState.warning,
+      WebRtcPhase.starting ||
+      WebRtcPhase.waitingForAnswer ||
+      WebRtcPhase.idle =>
+        _FieldTestStatusState.pending,
+    };
+  }
+
+  String get _aiStatusLabel {
+    if (!canUseAiVisionAssist) {
+      return '전방 카메라 필요';
+    }
+    if (!aiAssistEnabled) {
+      return '꺼짐';
+    }
+    if (aiVerificationMode) {
+      return '검증 모드';
+    }
+    final errorMessage = aiController.errorMessage;
+    if (errorMessage != null) {
+      return '확인 필요';
+    }
+    if (aiController.isAnalyzing) {
+      return '분석 중';
+    }
+    if (aiController.isRunning) {
+      final decision = aiController.lastDecision;
+      return decision == null ? '실시간 보조' : '최근 ${decision.level.label}';
+    }
+    return isLive ? '대기' : '라이브 후 대기';
+  }
+
+  _FieldTestStatusState get _aiStatusState {
+    if (!canUseAiVisionAssist) {
+      return _FieldTestStatusState.blocked;
+    }
+    if (!aiAssistEnabled) {
+      return _FieldTestStatusState.pending;
+    }
+    if (aiVerificationMode) {
+      return _FieldTestStatusState.warning;
+    }
+    if (aiController.errorMessage != null) {
+      return _FieldTestStatusState.warning;
+    }
+    if (aiController.isRunning) {
+      return _FieldTestStatusState.ready;
+    }
+    return _FieldTestStatusState.pending;
+  }
+
+  String get _nextStep {
+    final sessionPurpose = session?.purpose ?? purpose;
+    final sessionSourceMode = session?.sourceMode ?? sourceMode;
+
+    if (sessionPurpose != LiveSessionPurpose.runningGuide) {
+      return '방 종류를 러닝 가이드로 선택';
+    }
+    if (sessionSourceMode != LiveSourceMode.worldCamera) {
+      return '방송 소스를 눈앞 카메라로 변경';
+    }
+    if (!preRunChecklistComplete) {
+      return '러닝 전 안전 체크 완료';
+    }
+    if (session == null) {
+      return '라이브 세션 생성';
+    }
+    if (!isLive) {
+      return '정지 상태에서 라이브 시작';
+    }
+    if (webRtcPhase != WebRtcPhase.connected) {
+      return '가이드 참여 후 WebRTC 연결 확인';
+    }
+    if (aiAssistEnabled && aiVerificationMode) {
+      return '감속 큐와 정지 큐를 순서대로 테스트';
+    }
+    if (aiAssistEnabled) {
+      return '정지 상태에서 안전한 테스트 물체로 AI 분석 확인';
+    }
+    return '음성 안내, 채팅 TTS, 정지 후 재개 흐름 확인';
+  }
+}
+
+class _FieldTestStatusRow extends StatelessWidget {
+  const _FieldTestStatusRow({required this.item});
+
+  final _FieldTestStatusItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _stateColor(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(_stateIcon, color: color, size: 18),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 86,
+          child: Text(
+            item.label,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            item.value,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  IconData get _stateIcon {
+    return switch (item.state) {
+      _FieldTestStatusState.ready => Icons.check_circle,
+      _FieldTestStatusState.pending => Icons.radio_button_unchecked,
+      _FieldTestStatusState.warning => Icons.warning_amber,
+      _FieldTestStatusState.blocked => Icons.error,
+    };
+  }
+
+  Color _stateColor(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return switch (item.state) {
+      _FieldTestStatusState.ready => colorScheme.primary,
+      _FieldTestStatusState.pending => colorScheme.onSurfaceVariant,
+      _FieldTestStatusState.warning => const Color(0xFFB45309),
+      _FieldTestStatusState.blocked => colorScheme.error,
+    };
   }
 }
 
