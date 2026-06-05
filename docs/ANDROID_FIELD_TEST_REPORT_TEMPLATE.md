@@ -16,6 +16,7 @@ crowded races, night runs, or unknown routes.
 ## Test Metadata
 
 - Test guide used: `docs/ANDROID_FIRST_FIELD_TEST_GUIDE.md` / other
+- Failure response used: `docs/ANDROID_FIELD_TEST_FAILURE_RESPONSE.md` / none
 - Test date:
 - App build source: current branch debug APK
 - Tester role:

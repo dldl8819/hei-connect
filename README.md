@@ -51,6 +51,7 @@ Operational safety documents:
 - `docs/ANDROID_FIELD_TEST_CHECKLIST.md` for controlled Android field tests.
 - `docs/ANDROID_FIELD_TEST_REPORT_TEMPLATE.md` for written Android test
   reports.
+- `docs/ANDROID_FIELD_TEST_FAILURE_RESPONSE.md` for failed Android test steps.
 - `docs/MVP_SAFETY_BOUNDARIES.md` for MVP allow/block decisions.
 - `docs/SAFETY_PROTOCOL.md` for stop, connection-loss, and AI assist behavior.
 

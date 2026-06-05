@@ -123,6 +123,8 @@ camera frames, screenshots containing people, or any credentials.
 Use `docs/ANDROID_FIELD_TEST_REPORT_TEMPLATE.md` for the written test report.
 Use `docs/ANDROID_FIRST_FIELD_TEST_GUIDE.md` when the tester needs the exact
 button order.
+Use `docs/ANDROID_FIELD_TEST_FAILURE_RESPONSE.md` when a step fails or becomes
+unclear.
 
 ## Failure Cases
 

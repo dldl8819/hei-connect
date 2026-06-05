@@ -116,6 +116,8 @@ Do not start AI camera analysis first. The order is:
 ## If Something Fails
 
 - Stop movement first.
+- Follow `docs/ANDROID_FIELD_TEST_FAILURE_RESPONSE.md` for the matching failure
+  type.
 - Record only operational facts in `docs/ANDROID_FIELD_TEST_REPORT_TEMPLATE.md`.
 - Do not paste exact location, links, session codes, chat text, camera frames,
   screenshots with people, credentials, or private URLs.
