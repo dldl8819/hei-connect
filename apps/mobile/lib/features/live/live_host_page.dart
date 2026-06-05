@@ -38,7 +38,6 @@ class _LiveHostPageState extends State<LiveHostPage> {
   bool _supportEnabled = false;
   bool _aiAssistEnabled = false;
   bool _aiVisionVerificationMode = false;
-  bool _guideFlowConfirmed = false;
   bool _hasReportedConnectionLoss = false;
   bool _requiresResumeConfirmation = false;
   String? _errorMessage;
@@ -49,6 +48,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
   AiHazardDecision? _lastAiVerificationDecision;
   final Set<_PreRunChecklistItem> _confirmedPreRunItems =
       <_PreRunChecklistItem>{};
+  final Set<_GuideFlowChecklistItem> _confirmedGuideFlowItems =
+      <_GuideFlowChecklistItem>{};
   List<GuidanceCueEvent> _recentCueEvents = const [];
   int _lastCueSequence = 0;
   VoiceCue _lastCue = VoiceCue.stopNow;
@@ -120,7 +121,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                   setState(() {
                     _purpose = purpose;
                     _confirmedPreRunItems.clear();
-                    _guideFlowConfirmed = false;
+                    _clearGuideFlowChecks();
                     if (purpose == LiveSessionPurpose.runningGuide) {
                       _sourceMode = LiveSourceMode.worldCamera;
                     } else {
@@ -140,7 +141,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                     setState(() {
                       _runnerVisionMode = mode;
                       _confirmedPreRunItems.clear();
-                      _guideFlowConfirmed = false;
+                      _clearGuideFlowChecks();
                     });
                   },
                 ),
@@ -152,7 +153,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                 onSelected: (sourceMode) {
                   setState(() {
                     _sourceMode = sourceMode;
-                    _guideFlowConfirmed = false;
+                    _clearGuideFlowChecks();
                     if (_purpose == LiveSessionPurpose.runningGuide) {
                       _confirmedPreRunItems.clear();
                     }
@@ -185,7 +186,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                       isLive: _isLive,
                       controller: _aiAssist,
                       now: _statusNow,
-                      guideFlowConfirmed: _guideFlowConfirmed,
+                      guideFlowConfirmed: _isGuideFlowConfirmed,
                       verificationModeEnabled: _aiVisionVerificationMode,
                       verificationDecision: _lastAiVerificationDecision,
                       onEnabledChanged: _setAiAssistEnabled,
@@ -247,8 +248,9 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           webRtcPhase: _webRtc.phase,
                           fieldErrorMessage:
                               _errorMessage ?? _webRtc.errorMessage,
-                          guideFlowConfirmed: _guideFlowConfirmed,
-                          onGuideFlowConfirmedChanged: _setGuideFlowConfirmed,
+                          confirmedGuideFlowItems: _confirmedGuideFlowItems,
+                          onGuideFlowChecklistItemChanged:
+                              _setGuideFlowChecklistItem,
                           aiAssistEnabled: _aiAssistEnabled,
                           aiVerificationMode: _aiVisionVerificationMode,
                           canUseAiVisionAssist: _canUseAiVisionAssist,
@@ -377,6 +379,17 @@ class _LiveHostPageState extends State<LiveHostPage> {
         _confirmedPreRunItems.length == _PreRunChecklistItem.values.length;
   }
 
+  bool get _isGuideFlowConfirmed {
+    return _confirmedGuideFlowItems.length ==
+        _GuideFlowChecklistItem.values.length;
+  }
+
+  bool get _canConfirmGuideFlowChecks {
+    return _isLive &&
+        _webRtc.phase == WebRtcPhase.connected &&
+        !_requiresResumeConfirmation;
+  }
+
   void _setPreRunChecklistItem(_PreRunChecklistItem item, bool checked) {
     setState(() {
       if (checked) {
@@ -387,21 +400,27 @@ class _LiveHostPageState extends State<LiveHostPage> {
     });
   }
 
-  void _setGuideFlowConfirmed(bool checked) {
+  void _setGuideFlowChecklistItem(
+    _GuideFlowChecklistItem item,
+    bool checked,
+  ) {
     if (checked &&
-        (!_isLive ||
-            _webRtc.phase != WebRtcPhase.connected ||
-            _requiresResumeConfirmation)) {
+        (!_canConfirmGuideFlowChecks ||
+            _session?.purpose != LiveSessionPurpose.runningGuide)) {
       setState(() {
-        _guideFlowConfirmed = false;
-        _errorMessage = '가이드 연결, 음성 안내, 정지/재개 흐름을 먼저 확인해 주세요.';
+        _confirmedGuideFlowItems.remove(item);
+        _errorMessage = '라이브 연결, WebRTC 영상, 가이드 음성 흐름을 먼저 확인해 주세요.';
       });
       return;
     }
 
     setState(() {
-      _guideFlowConfirmed = checked;
-      if (!checked) {
+      if (checked) {
+        _confirmedGuideFlowItems.add(item);
+      } else {
+        _confirmedGuideFlowItems.remove(item);
+      }
+      if (!_isGuideFlowConfirmed) {
         _aiAssistEnabled = false;
         _aiVisionVerificationMode = false;
         _aiAssist.stop();
@@ -409,6 +428,13 @@ class _LiveHostPageState extends State<LiveHostPage> {
       _errorMessage = null;
     });
     _syncAiAssistWithLiveState();
+  }
+
+  void _clearGuideFlowChecks() {
+    _confirmedGuideFlowItems.clear();
+    _aiAssistEnabled = false;
+    _aiVisionVerificationMode = false;
+    _aiAssist.stop();
   }
 
   Future<void> _createChannel() async {
@@ -505,7 +531,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
         _signalState = null;
         _hasReportedConnectionLoss = false;
         _requiresResumeConfirmation = false;
-        _guideFlowConfirmed = false;
+        _clearGuideFlowChecks();
         _recentCueEvents = const [];
         _lastCueSequence = 0;
         _lastCue = VoiceCue.holdPace;
@@ -749,10 +775,11 @@ class _LiveHostPageState extends State<LiveHostPage> {
       return;
     }
 
-    if (enabled && _showsPreRunChecklist && !_guideFlowConfirmed) {
+    if (enabled && _showsPreRunChecklist && !_isGuideFlowConfirmed) {
       setState(() {
         _aiAssistEnabled = false;
-        _errorMessage = 'AI 보조 전에 WebRTC, 가이드 음성, 정지/재개 흐름을 먼저 확인해 주세요.';
+        _errorMessage =
+            'AI 보조 전에 WebRTC 영상, 가이드 음성, cue 버튼, 채팅 TTS, 정지/재개를 모두 확인해 주세요.';
       });
       _aiAssist.stop();
       return;
@@ -780,6 +807,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
     if (_aiAssistEnabled &&
         _isLive &&
         _canUseAiVisionAssist &&
+        (!_showsPreRunChecklist || _isGuideFlowConfirmed) &&
         !_aiVisionVerificationMode &&
         !_requiresResumeConfirmation) {
       _aiAssist.start();
@@ -889,6 +917,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
     _aiAssist.stop();
     setState(() {
       _lastCue = VoiceCue.stopNow;
+      _clearGuideFlowChecks();
       _requiresResumeConfirmation =
           session?.purpose == LiveSessionPurpose.runningGuide;
       _errorMessage = null;
@@ -938,6 +967,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
         _lastCueSequence = stopCue.sequence;
       }
       _lastCue = VoiceCue.stopNow;
+      _clearGuideFlowChecks();
       _requiresResumeConfirmation =
           session.purpose == LiveSessionPurpose.runningGuide;
       _errorMessage = stopError;
@@ -977,7 +1007,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
       }
       _isLive = false;
       _lastCue = VoiceCue.stopNow;
-      _guideFlowConfirmed = false;
+      _clearGuideFlowChecks();
       _requiresResumeConfirmation =
           session?.purpose == LiveSessionPurpose.runningGuide;
       _errorMessage = statusError ?? _webRtc.errorMessage;
@@ -1029,8 +1059,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
       _isLive = false;
       _lastCue = nextCue;
       _errorMessage = _webRtc.errorMessage;
-      if (requiresStop) {
-        _guideFlowConfirmed = false;
+      if (connectionEnded) {
+        _clearGuideFlowChecks();
       }
       _requiresResumeConfirmation = requiresResumeConfirmation;
     });
@@ -1311,7 +1341,7 @@ class _AiVisionAssistPanel extends StatelessWidget {
       return '러닝 가이드의 전방 카메라 모드에서 사용할 수 있습니다.';
     }
     if (!guideFlowConfirmed) {
-      return 'WebRTC, 가이드 음성, 정지/재개 흐름 확인 후 사용할 수 있습니다.';
+      return 'WebRTC 영상, 가이드 음성, cue 버튼, 채팅 TTS, 정지/재개 확인 후 사용할 수 있습니다.';
     }
     if (!enabled) {
       return '카메라 영상에서 가까운 물체를 감지하면 음성으로 알려줍니다.';
@@ -1373,6 +1403,51 @@ enum _FieldTestStatusState {
   pending,
   warning,
   blocked,
+}
+
+enum _GuideFlowChecklistItem {
+  webRtcVideo,
+  guideVoice,
+  cueButtons,
+  shortChatTts,
+  stopResume,
+}
+
+extension _GuideFlowChecklistItemText on _GuideFlowChecklistItem {
+  String get label {
+    return switch (this) {
+      _GuideFlowChecklistItem.webRtcVideo => 'WebRTC 영상 확인',
+      _GuideFlowChecklistItem.guideVoice => '가이드 음성',
+      _GuideFlowChecklistItem.cueButtons => 'cue 버튼',
+      _GuideFlowChecklistItem.shortChatTts => '짧은 채팅 TTS',
+      _GuideFlowChecklistItem.stopResume => '정지 큐 후 재개 확인',
+    };
+  }
+
+  String get detail {
+    return switch (this) {
+      _GuideFlowChecklistItem.webRtcVideo =>
+        '가이드 기기에서 눈앞 카메라 영상이 안정적으로 보이는지 확인합니다.',
+      _GuideFlowChecklistItem.guideVoice =>
+        '가이드의 짧은 음성 안내가 러너에게 명확히 들리는지 확인합니다.',
+      _GuideFlowChecklistItem.cueButtons =>
+        '감속, 유지, 정지 같은 cue 버튼 안내가 TTS로 전달되는지 확인합니다.',
+      _GuideFlowChecklistItem.shortChatTts =>
+        '가이드가 짧은 테스트 채팅을 보냈을 때 TTS가 읽어 주는지 확인합니다.',
+      _GuideFlowChecklistItem.stopResume =>
+        '정지 cue 뒤 러너가 멈추고 안전 확인 후에만 재개되는지 확인합니다.',
+    };
+  }
+
+  IconData get icon {
+    return switch (this) {
+      _GuideFlowChecklistItem.webRtcVideo => Icons.videocam,
+      _GuideFlowChecklistItem.guideVoice => Icons.record_voice_over,
+      _GuideFlowChecklistItem.cueButtons => Icons.touch_app,
+      _GuideFlowChecklistItem.shortChatTts => Icons.chat,
+      _GuideFlowChecklistItem.stopResume => Icons.pause_circle,
+    };
+  }
 }
 
 class _FieldTestStatusItem {
@@ -1444,8 +1519,8 @@ class _FieldTestStatusPanel extends StatelessWidget {
     required this.requiresResumeConfirmation,
     required this.webRtcPhase,
     required this.fieldErrorMessage,
-    required this.guideFlowConfirmed,
-    required this.onGuideFlowConfirmedChanged,
+    required this.confirmedGuideFlowItems,
+    required this.onGuideFlowChecklistItemChanged,
     required this.aiAssistEnabled,
     required this.aiVerificationMode,
     required this.canUseAiVisionAssist,
@@ -1465,14 +1540,36 @@ class _FieldTestStatusPanel extends StatelessWidget {
   final bool requiresResumeConfirmation;
   final WebRtcPhase webRtcPhase;
   final String? fieldErrorMessage;
-  final bool guideFlowConfirmed;
-  final ValueChanged<bool> onGuideFlowConfirmedChanged;
+  final Set<_GuideFlowChecklistItem> confirmedGuideFlowItems;
+  final void Function(_GuideFlowChecklistItem item, bool checked)
+      onGuideFlowChecklistItemChanged;
   final bool aiAssistEnabled;
   final bool aiVerificationMode;
   final bool canUseAiVisionAssist;
   final AiVisionAssistController aiController;
   final DateTime now;
   final AiHazardDecision? verificationDecision;
+
+  bool get guideFlowConfirmed {
+    return confirmedGuideFlowItems.length ==
+        _GuideFlowChecklistItem.values.length;
+  }
+
+  String get _guideFlowStatusLabel {
+    if (guideFlowConfirmed) {
+      return '확인 완료';
+    }
+    return '${confirmedGuideFlowItems.length}/${_GuideFlowChecklistItem.values.length} 확인';
+  }
+
+  _GuideFlowChecklistItem? get _nextMissingGuideFlowItem {
+    for (final item in _GuideFlowChecklistItem.values) {
+      if (!confirmedGuideFlowItems.contains(item)) {
+        return item;
+      }
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1517,7 +1614,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
       ),
       _FieldTestStatusItem(
         label: '가이드 흐름',
-        value: guideFlowConfirmed ? '확인 완료' : '확인 필요',
+        value: _guideFlowStatusLabel,
         state: guideFlowConfirmed
             ? _FieldTestStatusState.ready
             : _FieldTestStatusState.pending,
@@ -1571,18 +1668,30 @@ class _FieldTestStatusPanel extends StatelessWidget {
               _FieldTestStatusRow(item: item),
               const SizedBox(height: 8),
             ],
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              title: const Text('가이드 음성/정지 흐름 확인 완료'),
-              subtitle: const Text(
-                '가이드 음성, 큐 버튼, 짧은 채팅 TTS, 정지 후 재개를 확인한 뒤 체크합니다.',
-              ),
-              value: guideFlowConfirmed,
-              onChanged: _canConfirmGuideFlow
-                  ? (value) => onGuideFlowConfirmedChanged(value ?? false)
-                  : null,
+            Text('가이드 흐름 세부 확인', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 4),
+            Text(
+              '러너가 정지한 상태에서 각 항목을 따로 확인합니다.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
             ),
+            const SizedBox(height: 4),
+            for (final checklistItem in _GuideFlowChecklistItem.values)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                secondary: Icon(checklistItem.icon),
+                title: Text(checklistItem.label),
+                subtitle: Text(checklistItem.detail),
+                value: confirmedGuideFlowItems.contains(checklistItem),
+                onChanged: _canConfirmGuideFlow
+                    ? (value) => onGuideFlowChecklistItemChanged(
+                          checklistItem,
+                          value ?? false,
+                        )
+                    : null,
+              ),
             DecoratedBox(
               decoration: BoxDecoration(
                 color: _stateColor(context, nextAction.state).withValues(
@@ -1699,7 +1808,9 @@ class _FieldTestStatusPanel extends StatelessWidget {
   }
 
   bool get _canConfirmGuideFlow {
+    final sessionPurpose = session?.purpose ?? purpose;
     return isLive &&
+        sessionPurpose == LiveSessionPurpose.runningGuide &&
         webRtcPhase == WebRtcPhase.connected &&
         !requiresResumeConfirmation;
   }
@@ -1725,8 +1836,8 @@ class _FieldTestStatusPanel extends StatelessWidget {
       _FieldTestStageItem(
         title: '가이드 흐름',
         detail: guideFlowConfirmed
-            ? '가이드 음성, 큐, 짧은 채팅 TTS, 정지/재개 확인 완료'
-            : 'AI 보조 전에 가이드 음성과 정지/재개 흐름 확인 필요',
+            ? 'WebRTC 영상, 가이드 음성, cue, 채팅 TTS, 정지/재개 확인 완료'
+            : 'AI 보조 전에 가이드 흐름 5개 항목 확인 필요',
         icon: Icons.record_voice_over,
         state: guideFlowConfirmed
             ? _FieldTestStatusState.ready
@@ -1791,7 +1902,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
 
   String get _aiVerificationStageDetail {
     if (!guideFlowConfirmed) {
-      return '가이드 흐름 확인 후 시작';
+      return '가이드 흐름 5개 항목 확인 후 시작';
     }
     if (!aiAssistEnabled) {
       return 'AI 보조 안내 스위치를 켠 뒤 검증 모드를 사용';
@@ -1823,7 +1934,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
 
   String get _aiAnalysisStageDetail {
     if (!guideFlowConfirmed) {
-      return '가이드 흐름과 AI 검증 후 정지 상태에서만 진행';
+      return '가이드 흐름 5개 항목과 AI 검증 후 정지 상태에서만 진행';
     }
     if (!aiAssistEnabled) {
       return 'AI 보조가 꺼져 있습니다.';
@@ -1864,7 +1975,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
     }
     if (!aiAssistEnabled) {
       if (!guideFlowConfirmed) {
-        return '가이드 흐름 먼저';
+        return '가이드 흐름 5개 항목 먼저';
       }
       return '꺼짐';
     }
@@ -1977,10 +2088,13 @@ class _FieldTestStatusPanel extends StatelessWidget {
       );
     }
     if (!guideFlowConfirmed) {
-      return const _FieldTestNextAction(
-        title: '가이드 음성/정지 흐름 확인',
-        detail: '가이드 음성, 큐 버튼, 짧은 채팅 TTS, 정지 후 재개를 확인한 뒤 체크합니다.',
-        icon: Icons.record_voice_over,
+      final missingItem = _nextMissingGuideFlowItem;
+      return _FieldTestNextAction(
+        title: missingItem == null ? '가이드 흐름 확인' : '${missingItem.label} 확인',
+        detail: missingItem == null
+            ? 'WebRTC 영상, 가이드 음성, cue 버튼, 짧은 채팅 TTS, 정지 후 재개를 모두 확인합니다.'
+            : missingItem.detail,
+        icon: missingItem?.icon ?? Icons.record_voice_over,
         state: _FieldTestStatusState.pending,
       );
     }
@@ -2028,7 +2142,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
           '러너 이동을 먼저 멈춥니다.',
           '백업 동행자가 가까이 있는지 확인합니다.',
           '카메라와 오디오가 안정적일 때만 안전 확인 후 재개합니다.',
-          '재개 후 가이드 음성/정지 흐름을 다시 확인합니다.',
+          '재개 후 가이드 흐름 5개 항목을 다시 확인합니다.',
         ],
       );
     }
@@ -2073,7 +2187,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
             '러너를 정지 상태로 유지합니다.',
             '마이크 권한과 오디오 입력을 확인합니다.',
             '오픈이어, 한쪽 이어폰, 또는 스피커 출력으로 주변 소리를 유지합니다.',
-            '가이드 음성이 들리기 전에는 가이드 흐름 확인을 체크하지 않습니다.',
+            '가이드 음성이 들리기 전에는 가이드 음성 항목을 체크하지 않습니다.',
           ],
         );
       }
@@ -2119,22 +2233,25 @@ class _FieldTestStatusPanel extends StatelessWidget {
           '러너를 정지 상태로 유지합니다.',
           '가이드가 현재 세션에 참여했는지 확인합니다.',
           '필요하면 신호 새로고침을 누릅니다.',
-          '연결됨 상태 전에는 가이드 흐름 확인을 체크하지 않습니다.',
+          '연결됨 상태 전에는 WebRTC 영상 확인 항목을 체크하지 않습니다.',
         ],
       );
     }
 
     if (isLive && webRtcPhase == WebRtcPhase.connected && !guideFlowConfirmed) {
-      return const _FieldTestFailureGuide(
+      final missingItem = _nextMissingGuideFlowItem;
+      return _FieldTestFailureGuide(
         title: '가이드 흐름 확인 필요',
-        detail: 'AI 보조 전에 가이드 음성, 큐, 짧은 채팅 TTS, 정지/재개를 확인합니다.',
-        icon: Icons.record_voice_over,
+        detail: missingItem == null
+            ? 'AI 보조 전에 가이드 흐름 5개 항목을 모두 확인합니다.'
+            : '${missingItem.label}: ${missingItem.detail}',
+        icon: missingItem?.icon ?? Icons.record_voice_over,
         state: _FieldTestStatusState.pending,
         actions: [
-          '가이드 음성이 러너에게 들리는지 확인합니다.',
-          '큐 버튼과 짧은 채팅 TTS를 확인합니다.',
-          '정지 큐 후 안전 확인 재개가 필요한지 확인합니다.',
-          '모두 확인된 뒤 가이드 흐름 확인을 체크합니다.',
+          '러너를 정지 상태로 유지합니다.',
+          'WebRTC 영상 확인, 가이드 음성, cue 버튼, 짧은 채팅 TTS, 정지 큐 후 재개 확인을 각각 체크합니다.',
+          '누락된 항목은 실제로 확인된 뒤에만 체크합니다.',
+          '5개 항목이 모두 확인되기 전에는 AI 보조를 켜지 않습니다.',
         ],
       );
     }
