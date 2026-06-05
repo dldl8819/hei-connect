@@ -111,6 +111,8 @@ When a test fails, record only operational facts:
 Do not record exact locations, contact details, session links, chat text,
 camera frames, screenshots containing people, or any credentials.
 
+Use `docs/ANDROID_FIELD_TEST_REPORT_TEMPLATE.md` for the written test report.
+
 ## Failure Cases
 
 - Turn off supporter network and confirm connection-loss stop behavior.
