@@ -38,6 +38,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   bool _supportEnabled = false;
   bool _aiAssistEnabled = false;
   bool _aiVisionVerificationMode = false;
+  bool _guideFlowConfirmed = false;
   bool _hasReportedConnectionLoss = false;
   bool _requiresResumeConfirmation = false;
   String? _errorMessage;
@@ -119,6 +120,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                   setState(() {
                     _purpose = purpose;
                     _confirmedPreRunItems.clear();
+                    _guideFlowConfirmed = false;
                     if (purpose == LiveSessionPurpose.runningGuide) {
                       _sourceMode = LiveSourceMode.worldCamera;
                     } else {
@@ -138,6 +140,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                     setState(() {
                       _runnerVisionMode = mode;
                       _confirmedPreRunItems.clear();
+                      _guideFlowConfirmed = false;
                     });
                   },
                 ),
@@ -149,6 +152,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                 onSelected: (sourceMode) {
                   setState(() {
                     _sourceMode = sourceMode;
+                    _guideFlowConfirmed = false;
                     if (_purpose == LiveSessionPurpose.runningGuide) {
                       _confirmedPreRunItems.clear();
                     }
@@ -181,6 +185,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                       isLive: _isLive,
                       controller: _aiAssist,
                       now: _statusNow,
+                      guideFlowConfirmed: _guideFlowConfirmed,
                       verificationModeEnabled: _aiVisionVerificationMode,
                       verificationDecision: _lastAiVerificationDecision,
                       onEnabledChanged: _setAiAssistEnabled,
@@ -240,6 +245,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           requiresResumeConfirmation:
                               _requiresResumeConfirmation,
                           webRtcPhase: _webRtc.phase,
+                          guideFlowConfirmed: _guideFlowConfirmed,
+                          onGuideFlowConfirmedChanged: _setGuideFlowConfirmed,
                           aiAssistEnabled: _aiAssistEnabled,
                           aiVerificationMode: _aiVisionVerificationMode,
                           canUseAiVisionAssist: _canUseAiVisionAssist,
@@ -378,6 +385,30 @@ class _LiveHostPageState extends State<LiveHostPage> {
     });
   }
 
+  void _setGuideFlowConfirmed(bool checked) {
+    if (checked &&
+        (!_isLive ||
+            _webRtc.phase != WebRtcPhase.connected ||
+            _requiresResumeConfirmation)) {
+      setState(() {
+        _guideFlowConfirmed = false;
+        _errorMessage = '가이드 연결, 음성 안내, 정지/재개 흐름을 먼저 확인해 주세요.';
+      });
+      return;
+    }
+
+    setState(() {
+      _guideFlowConfirmed = checked;
+      if (!checked) {
+        _aiAssistEnabled = false;
+        _aiVisionVerificationMode = false;
+        _aiAssist.stop();
+      }
+      _errorMessage = null;
+    });
+    _syncAiAssistWithLiveState();
+  }
+
   Future<void> _createChannel() async {
     final title = _channelTitleController.text.trim();
     if (title.isEmpty) {
@@ -472,6 +503,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
         _signalState = null;
         _hasReportedConnectionLoss = false;
         _requiresResumeConfirmation = false;
+        _guideFlowConfirmed = false;
         _recentCueEvents = const [];
         _lastCueSequence = 0;
         _lastCue = VoiceCue.holdPace;
@@ -715,6 +747,15 @@ class _LiveHostPageState extends State<LiveHostPage> {
       return;
     }
 
+    if (enabled && _showsPreRunChecklist && !_guideFlowConfirmed) {
+      setState(() {
+        _aiAssistEnabled = false;
+        _errorMessage = 'AI 보조 전에 WebRTC, 가이드 음성, 정지/재개 흐름을 먼저 확인해 주세요.';
+      });
+      _aiAssist.stop();
+      return;
+    }
+
     setState(() {
       _aiAssistEnabled = enabled;
       if (!enabled) {
@@ -934,6 +975,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
       }
       _isLive = false;
       _lastCue = VoiceCue.stopNow;
+      _guideFlowConfirmed = false;
       _requiresResumeConfirmation =
           session?.purpose == LiveSessionPurpose.runningGuide;
       _errorMessage = statusError ?? _webRtc.errorMessage;
@@ -985,6 +1027,9 @@ class _LiveHostPageState extends State<LiveHostPage> {
       _isLive = false;
       _lastCue = nextCue;
       _errorMessage = _webRtc.errorMessage;
+      if (requiresStop) {
+        _guideFlowConfirmed = false;
+      }
       _requiresResumeConfirmation = requiresResumeConfirmation;
     });
     if (nextCue == VoiceCue.stopNow) {
@@ -1101,6 +1146,7 @@ class _AiVisionAssistPanel extends StatelessWidget {
     required this.isLive,
     required this.controller,
     required this.now,
+    required this.guideFlowConfirmed,
     required this.verificationModeEnabled,
     required this.verificationDecision,
     required this.onEnabledChanged,
@@ -1115,6 +1161,7 @@ class _AiVisionAssistPanel extends StatelessWidget {
   final bool isLive;
   final AiVisionAssistController controller;
   final DateTime now;
+  final bool guideFlowConfirmed;
   final bool verificationModeEnabled;
   final AiHazardDecision? verificationDecision;
   final ValueChanged<bool> onEnabledChanged;
@@ -1160,7 +1207,7 @@ class _AiVisionAssistPanel extends StatelessWidget {
               title: const Text('AI 보조 안내'),
               subtitle: Text(_statusText),
               value: enabled,
-              onChanged: canUse ? onEnabledChanged : null,
+              onChanged: canUse && guideFlowConfirmed ? onEnabledChanged : null,
             ),
             if (enabled) ...[
               Wrap(
@@ -1260,6 +1307,9 @@ class _AiVisionAssistPanel extends StatelessWidget {
   String get _statusText {
     if (!canUse) {
       return '러닝 가이드의 전방 카메라 모드에서 사용할 수 있습니다.';
+    }
+    if (!guideFlowConfirmed) {
+      return 'WebRTC, 가이드 음성, 정지/재개 흐름 확인 후 사용할 수 있습니다.';
     }
     if (!enabled) {
       return '카메라 영상에서 가까운 물체를 감지하면 음성으로 알려줍니다.';
@@ -1361,6 +1411,8 @@ class _FieldTestStatusPanel extends StatelessWidget {
     required this.preRunChecklistComplete,
     required this.requiresResumeConfirmation,
     required this.webRtcPhase,
+    required this.guideFlowConfirmed,
+    required this.onGuideFlowConfirmedChanged,
     required this.aiAssistEnabled,
     required this.aiVerificationMode,
     required this.canUseAiVisionAssist,
@@ -1379,6 +1431,8 @@ class _FieldTestStatusPanel extends StatelessWidget {
   final bool preRunChecklistComplete;
   final bool requiresResumeConfirmation;
   final WebRtcPhase webRtcPhase;
+  final bool guideFlowConfirmed;
+  final ValueChanged<bool> onGuideFlowConfirmedChanged;
   final bool aiAssistEnabled;
   final bool aiVerificationMode;
   final bool canUseAiVisionAssist;
@@ -1427,6 +1481,13 @@ class _FieldTestStatusPanel extends StatelessWidget {
         state: _webRtcStatusState,
       ),
       _FieldTestStatusItem(
+        label: '가이드 흐름',
+        value: guideFlowConfirmed ? '확인 완료' : '확인 필요',
+        state: guideFlowConfirmed
+            ? _FieldTestStatusState.ready
+            : _FieldTestStatusState.pending,
+      ),
+      _FieldTestStatusItem(
         label: 'AI 보조',
         value: _aiStatusLabel,
         state: _aiStatusState,
@@ -1462,6 +1523,18 @@ class _FieldTestStatusPanel extends StatelessWidget {
               _FieldTestStatusRow(item: item),
               const SizedBox(height: 8),
             ],
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('가이드 음성/정지 흐름 확인 완료'),
+              subtitle: const Text(
+                '가이드 음성, 큐 버튼, 짧은 채팅 TTS, 정지 후 재개를 확인한 뒤 체크합니다.',
+              ),
+              value: guideFlowConfirmed,
+              onChanged: _canConfirmGuideFlow
+                  ? (value) => onGuideFlowConfirmedChanged(value ?? false)
+                  : null,
+            ),
             DecoratedBox(
               decoration: BoxDecoration(
                 color: _stateColor(context, nextAction.state).withValues(
@@ -1568,11 +1641,20 @@ class _FieldTestStatusPanel extends StatelessWidget {
     };
   }
 
+  bool get _canConfirmGuideFlow {
+    return isLive &&
+        webRtcPhase == WebRtcPhase.connected &&
+        !requiresResumeConfirmation;
+  }
+
   String get _aiStatusLabel {
     if (!canUseAiVisionAssist) {
       return '전방 카메라 필요';
     }
     if (!aiAssistEnabled) {
+      if (!guideFlowConfirmed) {
+        return '가이드 흐름 먼저';
+      }
       return '꺼짐';
     }
     if (aiVerificationMode) {
@@ -1681,6 +1763,14 @@ class _FieldTestStatusPanel extends StatelessWidget {
         detail: '가이드 기기에서 참여한 뒤 WebRTC가 연결됨으로 바뀌는지 확인합니다.',
         icon: Icons.sync,
         state: _FieldTestStatusState.warning,
+      );
+    }
+    if (!guideFlowConfirmed) {
+      return const _FieldTestNextAction(
+        title: '가이드 음성/정지 흐름 확인',
+        detail: '가이드 음성, 큐 버튼, 짧은 채팅 TTS, 정지 후 재개를 확인한 뒤 체크합니다.',
+        icon: Icons.record_voice_over,
+        state: _FieldTestStatusState.pending,
       );
     }
     if (!aiAssistEnabled) {
