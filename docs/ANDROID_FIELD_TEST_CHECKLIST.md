@@ -11,8 +11,9 @@ routes.
 - Use a controlled track or closed route.
 - Keep a sighted backup person physically near the runner.
 - Use open-ear audio or a single-ear output that does not block ambient sound.
-- Mount the phone so the world-facing camera shows the forward path and foot
-  edge area.
+  Do not use noise-cancelling or sealed in-ear audio for running-guide tests.
+- Mount the phone so the world-facing camera shows the forward path, center
+  lane or path, and lower ground edge near the runner.
 - Fully charge the phone and keep a backup phone available.
 - Use a short test session first, then increase distance only after repeated
   stable results.
@@ -37,12 +38,17 @@ outside the test group.
 2. Choose host mode and create a running-guide session.
 3. Select the runner vision mode being tested.
 4. Confirm every pre-run checklist item.
-5. Start live media and grant camera and microphone permissions.
-6. Join from a second device using the session code or link.
-7. Confirm WebRTC video, supporter voice, cue buttons, and chat TTS.
-8. Run AI verification mode while stationary.
-9. Run AI camera analysis while stationary with a safe test object.
-10. Test connection loss, stop cue, and resume confirmation.
+5. Start live media while stationary and grant camera and microphone
+   permissions.
+6. Confirm the world-facing camera angle still shows forward path and lower
+   ground edge.
+7. Join from a second device using the session code or link.
+8. Confirm WebRTC video, supporter voice, cue buttons, chat TTS, and
+   stop/resume behavior.
+9. Check the in-app guide-flow confirmation.
+10. Run AI verification mode while stationary.
+11. Run AI camera analysis while stationary with a controlled test object.
+12. Test connection loss, stop cue, and resume confirmation.
 
 ## Before Starting Live
 
@@ -50,7 +56,8 @@ outside the test group.
 - Select the correct runner mode: non-visually impaired, low-vision, or blind.
 - Confirm every pre-run checklist item in the host app.
 - Confirm the camera preview shows the route ahead and the lower path area.
-- Confirm speaker or earphone output is loud enough.
+- Confirm speaker or earphone output is loud enough without blocking ambient
+  sound.
 - Confirm long-press emergency stop is understood by the tester.
 - Confirm the supporter can join with the session code or link.
 - Confirm the in-app field test status panel shows the controlled route and

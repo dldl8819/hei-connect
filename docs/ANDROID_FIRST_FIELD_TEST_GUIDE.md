@@ -9,12 +9,36 @@ or unknown routes.
 
 - Choose a controlled track, closed loop, or controlled park path.
 - Keep a sighted backup person physically near the runner.
-- Use open-ear or single-ear audio so ambient sound remains available.
-- Mount the phone so the world-facing camera sees the forward path and lower
-  edge area.
+- Use open-ear or single-ear audio so ambient sound remains available. Do not
+  use noise-cancelling or sealed in-ear audio for running-guide tests.
+- Mount the phone vertically or horizontally in a stable position so the
+  world-facing camera shows the lane ahead, the center path, and the lower
+  ground edge near the runner.
 - Prepare a second device for the guide.
 - Do not record exact locations, join links, chat text, raw camera frames,
   screenshots containing people, or credentials.
+
+## Permission And Media Timing
+
+- Android asks for camera and microphone permissions after `라이브 시작`.
+- Keep the runner stationary while permission prompts are handled.
+- Grant only camera and microphone permissions required for this test.
+- If a permission prompt is denied, stop the test and record the visible error
+  without copying links, codes, contact details, or private messages.
+- Confirm audio output before movement. The runner must still hear surrounding
+  sound and backup-person instructions.
+
+## Camera Angle Standard
+
+Before the guide joins, confirm the preview shows:
+
+- The forward path or lane center.
+- The lower ground edge near the runner's feet.
+- Enough horizon or forward context for the guide to describe direction.
+- No intentional capture of bystanders, private screens, addresses, or vehicle
+  plates.
+
+If the camera mount shifts, stop movement before adjusting it.
 
 ## Install And Open
 
@@ -40,15 +64,18 @@ Open the app on the Android test phone after installation.
 7. Press `라이브 세션 생성`.
 8. Keep the runner stationary and press `라이브 시작`.
 9. Allow camera and microphone permissions.
-10. On the guide device, join with the session code or link.
-11. Press `신호 새로고침` if WebRTC does not move to connected after the guide
+10. Confirm the camera angle still matches the standard above.
+11. On the guide device, join with the session code or link.
+12. Press `신호 새로고침` if WebRTC does not move to connected after the guide
     joins.
-12. Confirm guide voice, cue buttons, short chat TTS, and stop/resume behavior.
-13. Turn on `AI 보조 안내` only after the guide voice and stop flow work.
-14. Turn on `검증 모드`.
-15. Press `감속 큐 테스트`, then `정지 큐 테스트`, while the runner is stationary.
-16. After resume confirmation works, turn off `검증 모드`.
-17. Press `지금 분석` only while stationary and only with a safe test object.
+13. Confirm guide voice, cue buttons, short chat TTS, and stop/resume behavior.
+14. Check `가이드 음성/정지 흐름 확인 완료`.
+15. Turn on `AI 보조 안내` only after the guide voice and stop flow work.
+16. Turn on `검증 모드`.
+17. Press `감속 큐 테스트`, then `정지 큐 테스트`, while the runner is stationary.
+18. After resume confirmation works, turn off `검증 모드`.
+19. Press `지금 분석` only while stationary and only with a controlled test
+    object.
 
 ## Runner Mode Notes
 
@@ -79,11 +106,12 @@ Do not start AI camera analysis first. The order is:
 
 1. Safety checklist.
 2. Live media permissions.
-3. Guide joins and WebRTC connects.
-4. Guide voice, cue buttons, chat TTS.
-5. Stop cue and resume confirmation.
-6. AI verification mode.
-7. AI camera analysis while stationary.
+3. Camera angle confirmation.
+4. Guide joins and WebRTC connects.
+5. Guide voice, cue buttons, chat TTS.
+6. Stop cue and resume confirmation.
+7. AI verification mode.
+8. AI camera analysis while stationary.
 
 ## If Something Fails
 
@@ -92,4 +120,3 @@ Do not start AI camera analysis first. The order is:
 - Do not paste exact location, links, session codes, chat text, camera frames,
   screenshots with people, credentials, or private URLs.
 - Keep the test blocked until the failed step is reproduced and fixed.
-
