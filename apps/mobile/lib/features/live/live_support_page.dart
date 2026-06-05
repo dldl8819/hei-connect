@@ -15,6 +15,8 @@ import 'live_session_api.dart';
 import 'live_signaling_models.dart';
 import 'live_webrtc_controller.dart';
 import 'support_guide_flow.dart';
+import 'test_execution_checklist.dart';
+import 'test_execution_checklist_view.dart';
 import 'test_session_report.dart';
 import 'test_session_report_view.dart';
 
@@ -49,6 +51,8 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
   int _lastResumeConfirmedCueSequence = 0;
   final Set<GuideFlowChecklistItem> _confirmedGuideFlowItems =
       <GuideFlowChecklistItem>{};
+  final Set<TestExecutionChecklistItem> _completedTestExecutionItems =
+      <TestExecutionChecklistItem>{};
 
   @override
   void initState() {
@@ -117,11 +121,14 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
                   return _SupportGuideControlPanel(
                     flowState: _supportGuideFlowState,
                     guideFlowState: _guideFlowState,
+                    executionChecklistState: _testExecutionChecklistState,
                     report: _supportTestSessionReport,
                     isSendingCue: _isSendingCue,
                     selectedCue: _selectedCue,
                     onCueSelected: (cue) => unawaited(_sendCue(cue)),
                     onResumeConfirmed: _confirmResumeAfterStop,
+                    onExecutionChecklistItemChanged:
+                        _setTestExecutionChecklistItem,
                     onGuideFlowChecklistItemChanged: _setGuideFlowChecklistItem,
                   );
                 },
@@ -223,6 +230,7 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
             _lastStopCueSequence = 0;
             _lastResumeConfirmedCueSequence = 0;
             _confirmedGuideFlowItems.clear();
+            _completedTestExecutionItems.clear();
           });
           _startCueHistoryPolling(session);
         case InviteTargetKind.channel:
@@ -241,6 +249,7 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
             _lastStopCueSequence = 0;
             _lastResumeConfirmedCueSequence = 0;
             _confirmedGuideFlowItems.clear();
+            _completedTestExecutionItems.clear();
           });
           _stopCueHistoryPolling();
       }
@@ -433,6 +442,10 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
     return GuideFlowChecklistState(_confirmedGuideFlowItems);
   }
 
+  TestExecutionChecklistState get _testExecutionChecklistState {
+    return TestExecutionChecklistState(_completedTestExecutionItems);
+  }
+
   SupportGuideFlowState get _supportGuideFlowState {
     final connectionLost = _webRtc.safetyStopRequired ||
         _webRtc.phase == WebRtcPhase.connectionLost ||
@@ -460,6 +473,18 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
               _lastStopCueSequence <= _lastResumeConfirmedCueSequence,
       memo: FieldTestResultMemo.fromInput(),
     );
+  }
+
+  void _setTestExecutionChecklistItem(
+    TestExecutionChecklistItem item,
+    bool checked,
+  ) {
+    setState(() {
+      final nextState = _testExecutionChecklistState.updateItem(item, checked);
+      _completedTestExecutionItems
+        ..clear()
+        ..addAll(nextState.completedItems);
+    });
   }
 
   void _setGuideFlowChecklistItem(
@@ -555,21 +580,26 @@ class _SupportGuideControlPanel extends StatelessWidget {
   const _SupportGuideControlPanel({
     required this.flowState,
     required this.guideFlowState,
+    required this.executionChecklistState,
     required this.report,
     required this.isSendingCue,
     required this.selectedCue,
     required this.onCueSelected,
     required this.onResumeConfirmed,
+    required this.onExecutionChecklistItemChanged,
     required this.onGuideFlowChecklistItemChanged,
   });
 
   final SupportGuideFlowState flowState;
   final GuideFlowChecklistState guideFlowState;
+  final TestExecutionChecklistState executionChecklistState;
   final TestSessionReport report;
   final bool isSendingCue;
   final VoiceCue selectedCue;
   final ValueChanged<VoiceCue> onCueSelected;
   final VoidCallback onResumeConfirmed;
+  final void Function(TestExecutionChecklistItem item, bool checked)
+      onExecutionChecklistItemChanged;
   final void Function(GuideFlowChecklistItem item, bool checked)
       onGuideFlowChecklistItemChanged;
 
@@ -643,6 +673,11 @@ class _SupportGuideControlPanel extends StatelessWidget {
               const SizedBox(height: 8),
               const Text('큐 전송 중'),
             ],
+            const SizedBox(height: 12),
+            TestExecutionChecklistView(
+              state: executionChecklistState,
+              onItemChanged: onExecutionChecklistItemChanged,
+            ),
             const SizedBox(height: 12),
             GuideFlowChecklistSection(
               state: guideFlowState,

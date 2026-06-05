@@ -16,6 +16,8 @@ import 'live_session_api.dart';
 import 'live_models.dart';
 import 'live_signaling_models.dart';
 import 'live_webrtc_controller.dart';
+import 'test_execution_checklist.dart';
+import 'test_execution_checklist_view.dart';
 import 'test_session_report.dart';
 import 'test_session_report_view.dart';
 
@@ -66,6 +68,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
       <_PreRunChecklistItem>{};
   final Set<GuideFlowChecklistItem> _confirmedGuideFlowItems =
       <GuideFlowChecklistItem>{};
+  final Set<TestExecutionChecklistItem> _completedTestExecutionItems =
+      <TestExecutionChecklistItem>{};
   List<GuidanceCueEvent> _recentCueEvents = const [];
   int _lastCueSequence = 0;
   VoiceCue _lastCue = VoiceCue.stopNow;
@@ -298,6 +302,9 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           gate: _fieldTestModeStartGate,
                           snapshot: _fieldTestModeSnapshot,
                           testOrderState: _fieldTestDeviceTestOrderState,
+                          executionChecklistState: _testExecutionChecklistState,
+                          onExecutionChecklistItemChanged:
+                              _setTestExecutionChecklistItem,
                           report: _fieldTestSessionReport,
                           active: _fieldTestModeActive,
                           lastSummary: _lastFieldTestSummary,
@@ -499,6 +506,10 @@ class _LiveHostPageState extends State<LiveHostPage> {
     );
   }
 
+  TestExecutionChecklistState get _testExecutionChecklistState {
+    return TestExecutionChecklistState(_completedTestExecutionItems);
+  }
+
   TestSessionReport get _fieldTestSessionReport {
     return TestSessionReport(
       role: TestSessionReportRole.runner,
@@ -541,6 +552,18 @@ class _LiveHostPageState extends State<LiveHostPage> {
       } else {
         _confirmedPreRunItems.remove(item);
       }
+    });
+  }
+
+  void _setTestExecutionChecklistItem(
+    TestExecutionChecklistItem item,
+    bool checked,
+  ) {
+    setState(() {
+      final nextState = _testExecutionChecklistState.updateItem(item, checked);
+      _completedTestExecutionItems
+        ..clear()
+        ..addAll(nextState.completedItems);
     });
   }
 
@@ -2405,6 +2428,8 @@ class _FieldTestModePanel extends StatelessWidget {
     required this.gate,
     required this.snapshot,
     required this.testOrderState,
+    required this.executionChecklistState,
+    required this.onExecutionChecklistItemChanged,
     required this.report,
     required this.active,
     required this.lastSummary,
@@ -2424,6 +2449,9 @@ class _FieldTestModePanel extends StatelessWidget {
   final FieldTestModeStartGate gate;
   final FieldTestModeSnapshot snapshot;
   final FieldTestDeviceTestOrderState testOrderState;
+  final TestExecutionChecklistState executionChecklistState;
+  final void Function(TestExecutionChecklistItem item, bool checked)
+      onExecutionChecklistItemChanged;
   final TestSessionReport report;
   final bool active;
   final FieldTestModeSummary? lastSummary;
@@ -2460,6 +2488,11 @@ class _FieldTestModePanel extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _FieldTestDeviceOrderView(order: testOrderState),
+            const SizedBox(height: 12),
+            TestExecutionChecklistView(
+              state: executionChecklistState,
+              onItemChanged: onExecutionChecklistItemChanged,
+            ),
             const SizedBox(height: 12),
             if (active)
               _ActiveFieldTestModeSummary(snapshot: snapshot, onEnd: onEnd)
