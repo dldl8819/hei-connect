@@ -35,8 +35,8 @@ private URLs.
 - Confirm runner audio uses open-ear, single-ear, or speaker output that does
   not block ambient sound.
 - Test cue buttons before chat TTS.
-- Do not check `가이드 음성/정지 흐름 확인 완료` until guide voice and stop/resume
-  behavior are confirmed.
+- Do not check `가이드 음성` until voice is clearly heard.
+- Do not enable AI assist until all five guide-flow items are checked.
 
 ## WebRTC Does Not Connect
 
@@ -51,7 +51,8 @@ private URLs.
 ## AI Verification Mode Fails
 
 - Keep the runner stationary.
-- Confirm `가이드 음성/정지 흐름 확인 완료` is checked.
+- Confirm `WebRTC 영상 확인`, `가이드 음성`, `cue 버튼`, `짧은 채팅 TTS`,
+  and `정지 큐 후 재개 확인` are all checked.
 - Confirm `AI 보조 안내` is on.
 - Confirm `검증 모드` is on.
 - Press `감속 큐 테스트` first, then `정지 큐 테스트`.
@@ -75,6 +76,4 @@ private URLs.
 - Do not continue because the video or audio reconnects by itself.
 - Use `안전 확인 후 재개` only after the runner has stopped and camera/audio are
   stable.
-- Re-check guide voice, cue buttons, and stop/resume behavior before enabling
-  AI assist again.
-
+- Re-check all five guide-flow items before enabling AI assist again.

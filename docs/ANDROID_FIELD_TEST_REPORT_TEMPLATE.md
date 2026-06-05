@@ -46,9 +46,12 @@ crowded races, night runs, or unknown routes.
 | Create running-guide session | Session is created |  | pass / fail / not tested |  |
 | Start live media | Camera and microphone start |  | pass / fail / not tested |  |
 | Supporter joins | WebRTC connects |  | pass / fail / not tested |  |
-| Supporter voice | Runner hears supporter |  | pass / fail / not tested |  |
+| WebRTC video check | Supporter sees forward camera video |  | pass / fail / not tested |  |
+| Guide voice | Runner hears supporter voice |  | pass / fail / not tested |  |
 | Cue buttons | Host TTS speaks cues |  | pass / fail / not tested |  |
-| Short chat TTS | Host TTS reads short safe test message |  | pass / fail / not tested |  |
+| Short chat TTS | Host TTS reads a short safe test message |  | pass / fail / not tested |  |
+| Stop cue and resume | Stop cue pauses flow and resume requires safety confirmation |  | pass / fail / not tested |  |
+| Guide-flow status | App shows 5/5 or guide-flow complete |  | pass / fail / not tested |  |
 | AI verification slow-down | Slow-down cue flow works while stationary |  | pass / fail / not tested |  |
 | AI verification stop | Stop cue pauses session and requires resume |  | pass / fail / not tested |  |
 | AI camera analysis | Safe test object triggers expected cue while stationary |  | pass / fail / not tested |  |
@@ -61,6 +64,7 @@ Write only the visible status labels, not codes or links.
 - Field test status panel next action:
 - Live status:
 - WebRTC phase:
+- Guide-flow checked items: 0 / 1 / 2 / 3 / 4 / 5
 - AI assist status:
 - Resume confirmation: required / not required
 - Visible error message with sensitive details removed:

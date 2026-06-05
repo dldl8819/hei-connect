@@ -43,9 +43,9 @@ outside the test group.
 6. Confirm the world-facing camera angle still shows forward path and lower
    ground edge.
 7. Join from a second device using the session code or link.
-8. Confirm WebRTC video, supporter voice, cue buttons, chat TTS, and
-   stop/resume behavior.
-9. Check the in-app guide-flow confirmation.
+8. Confirm each in-app guide-flow item separately: `WebRTC 영상 확인`,
+   `가이드 음성`, `cue 버튼`, `짧은 채팅 TTS`, and `정지 큐 후 재개 확인`.
+9. Confirm the guide-flow status reaches `5/5 확인` or `확인 완료`.
 10. Run AI verification mode while stationary.
 11. Run AI camera analysis while stationary with a controlled test object.
 12. Test connection loss, stop cue, and resume confirmation.
@@ -66,12 +66,16 @@ outside the test group.
 ## WebRTC And Guide Flow
 
 - Start the host stream.
-- Confirm the supporter sees the live forward camera view.
-- Confirm supporter voice reaches the runner.
-- Send each guide cue from the supporter screen and confirm host TTS speaks it.
-- Send a supporter chat message and confirm host TTS reads it.
-- Pause and resume the session, confirming resume requires explicit safety
-  confirmation.
+- Check `WebRTC 영상 확인` only after the supporter sees the live forward
+  camera view.
+- Check `가이드 음성` only after supporter voice reaches the runner.
+- Check `cue 버튼` only after each guide cue from the supporter screen is
+  spoken by host TTS.
+- Check `짧은 채팅 TTS` only after a short safe supporter chat message is read
+  by host TTS.
+- Check `정지 큐 후 재개 확인` only after the stop cue pauses the flow and
+  resume requires explicit safety confirmation.
+- Do not enable AI assist until all five guide-flow items are checked.
 
 ## AI Assist Verification Mode
 

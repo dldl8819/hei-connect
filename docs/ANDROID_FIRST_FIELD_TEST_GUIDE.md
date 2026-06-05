@@ -68,9 +68,11 @@ Open the app on the Android test phone after installation.
 11. On the guide device, join with the session code or link.
 12. Press `신호 새로고침` if WebRTC does not move to connected after the guide
     joins.
-13. Confirm guide voice, cue buttons, short chat TTS, and stop/resume behavior.
-14. Check `가이드 음성/정지 흐름 확인 완료`.
-15. Turn on `AI 보조 안내` only after the guide voice and stop flow work.
+13. In `가이드 흐름 세부 확인`, check each item only after it works:
+    `WebRTC 영상 확인`, `가이드 음성`, `cue 버튼`, `짧은 채팅 TTS`,
+    and `정지 큐 후 재개 확인`.
+14. Confirm the app shows guide flow as `5/5 확인` or `확인 완료`.
+15. Turn on `AI 보조 안내` only after all five guide-flow items are checked.
 16. Turn on `검증 모드`.
 17. Press `감속 큐 테스트`, then `정지 큐 테스트`, while the runner is stationary.
 18. After resume confirmation works, turn off `검증 모드`.
@@ -108,10 +110,11 @@ Do not start AI camera analysis first. The order is:
 2. Live media permissions.
 3. Camera angle confirmation.
 4. Guide joins and WebRTC connects.
-5. Guide voice, cue buttons, chat TTS.
-6. Stop cue and resume confirmation.
-7. AI verification mode.
-8. AI camera analysis while stationary.
+5. WebRTC video visible on the guide device.
+6. Guide voice, cue buttons, chat TTS.
+7. Stop cue and resume confirmation.
+8. AI verification mode.
+9. AI camera analysis while stationary.
 
 ## If Something Fails
 
