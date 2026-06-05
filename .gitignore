@@ -16,6 +16,7 @@ target/
 
 # Flutter / Dart
 .dart_tool/
+.gradle/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages
