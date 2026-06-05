@@ -1385,6 +1385,20 @@ class _FieldTestStatusItem {
   final _FieldTestStatusState state;
 }
 
+class _FieldTestStageItem {
+  const _FieldTestStageItem({
+    required this.title,
+    required this.detail,
+    required this.icon,
+    required this.state,
+  });
+
+  final String title;
+  final String detail;
+  final IconData icon;
+  final _FieldTestStatusState state;
+}
+
 class _FieldTestNextAction {
   const _FieldTestNextAction({
     required this.title,
@@ -1450,6 +1464,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
         sessionPurpose == LiveSessionPurpose.runningGuide &&
             sessionSourceMode == LiveSourceMode.worldCamera &&
             preRunChecklistComplete;
+    final stageItems = _stageItems(runningGuideReady);
     final items = <_FieldTestStatusItem>[
       _FieldTestStatusItem(
         label: '안전 기준',
@@ -1519,6 +1534,18 @@ class _FieldTestStatusPanel extends StatelessWidget {
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 12),
+            Text('테스트 단계', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            for (final stage in stageItems) ...[
+              _FieldTestStageRow(
+                stage: stage,
+                color: _stateColor(context, stage.state),
+              ),
+              const SizedBox(height: 8),
+            ],
+            const SizedBox(height: 4),
+            Text('상세 상태', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
             for (final item in items) ...[
               _FieldTestStatusRow(item: item),
               const SizedBox(height: 8),
@@ -1645,6 +1672,160 @@ class _FieldTestStatusPanel extends StatelessWidget {
     return isLive &&
         webRtcPhase == WebRtcPhase.connected &&
         !requiresResumeConfirmation;
+  }
+
+  List<_FieldTestStageItem> _stageItems(bool runningGuideReady) {
+    return [
+      _FieldTestStageItem(
+        title: '사전 준비',
+        detail: runningGuideReady
+            ? '통제 경로, 백업 동행자, 오디오, 눈앞 카메라 각도 확인 완료'
+            : '러닝 전 안전 체크와 눈앞 카메라 각도를 먼저 확인',
+        icon: Icons.checklist,
+        state: runningGuideReady
+            ? _FieldTestStatusState.ready
+            : _FieldTestStatusState.pending,
+      ),
+      _FieldTestStageItem(
+        title: '라이브 연결',
+        detail: _liveStageDetail,
+        icon: Icons.video_call,
+        state: _liveStageState,
+      ),
+      _FieldTestStageItem(
+        title: '가이드 흐름',
+        detail: guideFlowConfirmed
+            ? '가이드 음성, 큐, 짧은 채팅 TTS, 정지/재개 확인 완료'
+            : 'AI 보조 전에 가이드 음성과 정지/재개 흐름 확인 필요',
+        icon: Icons.record_voice_over,
+        state: guideFlowConfirmed
+            ? _FieldTestStatusState.ready
+            : _guideFlowStageState,
+      ),
+      _FieldTestStageItem(
+        title: 'AI 검증',
+        detail: _aiVerificationStageDetail,
+        icon: Icons.science,
+        state: _aiVerificationStageState,
+      ),
+      _FieldTestStageItem(
+        title: '실제 AI 분석',
+        detail: _aiAnalysisStageDetail,
+        icon: Icons.visibility,
+        state: _aiAnalysisStageState,
+      ),
+    ];
+  }
+
+  String get _liveStageDetail {
+    if (requiresResumeConfirmation) {
+      return '정지 후 안전 확인이 필요합니다.';
+    }
+    if (session == null) {
+      return '세션 생성 전입니다.';
+    }
+    if (isStartingMedia) {
+      return '카메라와 마이크 권한을 허용하고 있습니다.';
+    }
+    if (!isLive) {
+      return '라이브 시작 전입니다. 권한 요청은 라이브 시작 후 표시됩니다.';
+    }
+    if (webRtcPhase == WebRtcPhase.connected) {
+      return '가이드 기기와 WebRTC 연결 완료';
+    }
+    return '가이드 참여와 WebRTC 연결 확인 필요';
+  }
+
+  _FieldTestStatusState get _liveStageState {
+    if (requiresResumeConfirmation) {
+      return _FieldTestStatusState.blocked;
+    }
+    if (isLive && webRtcPhase == WebRtcPhase.connected) {
+      return _FieldTestStatusState.ready;
+    }
+    if (isLive || isStartingMedia) {
+      return _FieldTestStatusState.warning;
+    }
+    return _FieldTestStatusState.pending;
+  }
+
+  _FieldTestStatusState get _guideFlowStageState {
+    if (requiresResumeConfirmation) {
+      return _FieldTestStatusState.blocked;
+    }
+    if (_canConfirmGuideFlow) {
+      return _FieldTestStatusState.pending;
+    }
+    return _FieldTestStatusState.warning;
+  }
+
+  String get _aiVerificationStageDetail {
+    if (!guideFlowConfirmed) {
+      return '가이드 흐름 확인 후 시작';
+    }
+    if (!aiAssistEnabled) {
+      return 'AI 보조 안내 스위치를 켠 뒤 검증 모드를 사용';
+    }
+    if (!aiVerificationMode) {
+      return '검증 모드를 켜고 감속/정지 큐 흐름 확인';
+    }
+    final decision = verificationDecision;
+    if (decision == null) {
+      return '감속 큐 테스트와 정지 큐 테스트를 순서대로 실행';
+    }
+    return '최근 검증 ${decision.level.label} ${decision.ageLabelAt(now)}';
+  }
+
+  _FieldTestStatusState get _aiVerificationStageState {
+    if (!guideFlowConfirmed) {
+      return _FieldTestStatusState.pending;
+    }
+    if (!aiAssistEnabled) {
+      return _FieldTestStatusState.pending;
+    }
+    if (!aiVerificationMode) {
+      return _FieldTestStatusState.pending;
+    }
+    return verificationDecision == null
+        ? _FieldTestStatusState.warning
+        : _FieldTestStatusState.ready;
+  }
+
+  String get _aiAnalysisStageDetail {
+    if (!guideFlowConfirmed) {
+      return '가이드 흐름과 AI 검증 후 정지 상태에서만 진행';
+    }
+    if (!aiAssistEnabled) {
+      return 'AI 보조가 꺼져 있습니다.';
+    }
+    if (aiVerificationMode) {
+      return '검증 모드에서는 실제 카메라 분석을 하지 않습니다.';
+    }
+    if (aiController.errorMessage != null) {
+      return 'AI 분석 상태 확인 필요';
+    }
+    final decision = aiController.lastDecision;
+    if (decision == null) {
+      return '정지 상태에서 지금 분석 버튼으로 확인';
+    }
+    if (decision.isStaleAt(now)) {
+      return '최근 판단이 오래됐습니다. 정지 상태에서 다시 분석';
+    }
+    return '최근 실제 분석 ${decision.level.label} ${decision.ageLabelAt(now)}';
+  }
+
+  _FieldTestStatusState get _aiAnalysisStageState {
+    if (!guideFlowConfirmed || !aiAssistEnabled) {
+      return _FieldTestStatusState.pending;
+    }
+    if (aiVerificationMode || aiController.errorMessage != null) {
+      return _FieldTestStatusState.warning;
+    }
+    final decision = aiController.lastDecision;
+    if (decision == null || decision.isStaleAt(now)) {
+      return _FieldTestStatusState.warning;
+    }
+    return _FieldTestStatusState.ready;
   }
 
   String get _aiStatusLabel {
@@ -1867,6 +2048,52 @@ class _FieldTestStatusRow extends StatelessWidget {
       _FieldTestStatusState.warning => const Color(0xFFB45309),
       _FieldTestStatusState.blocked => colorScheme.error,
     };
+  }
+}
+
+class _FieldTestStageRow extends StatelessWidget {
+  const _FieldTestStageRow({
+    required this.stage,
+    required this.color,
+  });
+
+  final _FieldTestStageItem stage;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(stage.icon, color: color, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    stage.title,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(stage.detail),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
