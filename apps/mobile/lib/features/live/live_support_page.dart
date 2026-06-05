@@ -19,6 +19,8 @@ import 'test_execution_checklist.dart';
 import 'test_execution_checklist_view.dart';
 import 'test_progress_guard.dart';
 import 'test_progress_guard_view.dart';
+import 'test_status_observer.dart';
+import 'test_status_observer_view.dart';
 import 'test_session_report.dart';
 import 'test_session_report_view.dart';
 
@@ -123,6 +125,7 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
                   return _SupportGuideControlPanel(
                     flowState: _supportGuideFlowState,
                     progressGuardState: _guideTestProgressGuardState,
+                    observerState: _guideTestStatusObserverState,
                     guideFlowState: _guideFlowState,
                     executionChecklistState: _testExecutionChecklistState,
                     report: _supportTestSessionReport,
@@ -475,6 +478,28 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
     );
   }
 
+  GuideTestStatusObserverState get _guideTestStatusObserverState {
+    final connectionLost = _webRtc.safetyStopRequired ||
+        _webRtc.phase == WebRtcPhase.connectionLost ||
+        _webRtc.phase == WebRtcPhase.failed;
+    return GuideTestStatusObserverState(
+      sessionJoined: _session != null,
+      webRtcConnected: _webRtc.phase == WebRtcPhase.connected,
+      connectionLost: connectionLost,
+      mediaPermissionsReady: _webRtc.phase == WebRtcPhase.connected ||
+          _webRtc.phase == WebRtcPhase.waitingForAnswer,
+      guideFlowState: _guideFlowState,
+      aiVerificationChecked: _testExecutionChecklistState.contains(
+        TestExecutionChecklistItem.aiVerificationMode,
+      ),
+      actualAiAnalysisChecked: _testExecutionChecklistState.contains(
+        TestExecutionChecklistItem.stationaryAiAnalysis,
+      ),
+      stopCueAwaitingResume:
+          _lastStopCueSequence > _lastResumeConfirmedCueSequence,
+    );
+  }
+
   TestSessionReport get _supportTestSessionReport {
     return TestSessionReport(
       role: TestSessionReportRole.guide,
@@ -597,6 +622,7 @@ class _SupportGuideControlPanel extends StatelessWidget {
   const _SupportGuideControlPanel({
     required this.flowState,
     required this.progressGuardState,
+    required this.observerState,
     required this.guideFlowState,
     required this.executionChecklistState,
     required this.report,
@@ -610,6 +636,7 @@ class _SupportGuideControlPanel extends StatelessWidget {
 
   final SupportGuideFlowState flowState;
   final GuideTestProgressGuardState progressGuardState;
+  final GuideTestStatusObserverState observerState;
   final GuideFlowChecklistState guideFlowState;
   final TestExecutionChecklistState executionChecklistState;
   final TestSessionReport report;
@@ -672,6 +699,8 @@ class _SupportGuideControlPanel extends StatelessWidget {
               const SizedBox(height: 10),
               _SupportSafetyHoldPanel(flowState: flowState),
             ],
+            const SizedBox(height: 12),
+            TestStatusObserverView(state: observerState),
             const SizedBox(height: 12),
             TestProgressGuardView(
               decisions: progressGuardState.decisions,

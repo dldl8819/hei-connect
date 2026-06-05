@@ -20,6 +20,8 @@ import 'test_execution_checklist.dart';
 import 'test_execution_checklist_view.dart';
 import 'test_progress_guard.dart';
 import 'test_progress_guard_view.dart';
+import 'test_status_observer.dart';
+import 'test_status_observer_view.dart';
 import 'test_session_report.dart';
 import 'test_session_report_view.dart';
 
@@ -202,6 +204,22 @@ class _LiveHostPageState extends State<LiveHostPage> {
                   confirmedItems: _confirmedPreRunItems,
                   enabled: !_isLive && !_isCreating && !_isStartingMedia,
                   onChanged: _setPreRunChecklistItem,
+                ),
+              ],
+              if (_showsPreRunChecklist) ...[
+                const SizedBox(height: 16),
+                AnimatedBuilder(
+                  animation: _webRtc,
+                  builder: (context, _) {
+                    return AnimatedBuilder(
+                      animation: _aiAssist,
+                      builder: (context, _) {
+                        return TestStatusObserverView(
+                          state: _runnerTestStatusObserverState,
+                        );
+                      },
+                    );
+                  },
                 ),
               ],
               if (_showsPreRunChecklist) ...[
@@ -534,6 +552,30 @@ class _LiveHostPageState extends State<LiveHostPage> {
       guideFlowComplete: _guideFlowState.allowsAiAssist,
       aiVerificationChecked: _lastAiVerificationDecision != null,
       reportReady: _fieldTestSessionReport.isReady,
+    );
+  }
+
+  RunnerTestStatusObserverState get _runnerTestStatusObserverState {
+    final connectionLost = _webRtc.safetyStopRequired ||
+        _webRtc.phase == WebRtcPhase.connectionLost ||
+        _webRtc.phase == WebRtcPhase.failed;
+    final actualAiAnalysisAvailable =
+        _runnerTestProgressGuardState.actualAiAnalysis.allowed &&
+            _isLive &&
+            _aiAssistEnabled &&
+            !_aiVisionVerificationMode &&
+            !_requiresResumeConfirmation &&
+            !connectionLost;
+    return RunnerTestStatusObserverState(
+      isLive: _isLive,
+      webRtcConnected: _webRtc.phase == WebRtcPhase.connected,
+      connectionLost: connectionLost,
+      mediaPermissionsReady: _isLive || _webRtc.phase == WebRtcPhase.connected,
+      guideFlowState: _guideFlowState,
+      aiVerificationMode: _aiVisionVerificationMode,
+      aiVerificationChecked: _lastAiVerificationDecision != null,
+      actualAiAnalysisAvailable: actualAiAnalysisAvailable,
+      requiresResumeConfirmation: _requiresResumeConfirmation,
     );
   }
 
