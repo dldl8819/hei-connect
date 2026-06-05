@@ -8,6 +8,7 @@ import '../../core/safety/screen_awake.dart';
 import '../../core/safety/voice_cues.dart';
 import '../ai/ai_vision_assist_controller.dart';
 import '../ai/ai_vision_models.dart';
+import 'guide_flow_accessibility_widgets.dart';
 import 'guide_flow_checklist.dart';
 import 'live_chat_panel.dart';
 import 'live_session_api.dart';
@@ -187,7 +188,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                       isLive: _isLive,
                       controller: _aiAssist,
                       now: _statusNow,
-                      guideFlowConfirmed: _isGuideFlowConfirmed,
+                      guideFlowState: _guideFlowState,
                       verificationModeEnabled: _aiVisionVerificationMode,
                       verificationDecision: _lastAiVerificationDecision,
                       onEnabledChanged: _setAiAssistEnabled,
@@ -1179,7 +1180,7 @@ class _AiVisionAssistPanel extends StatelessWidget {
     required this.isLive,
     required this.controller,
     required this.now,
-    required this.guideFlowConfirmed,
+    required this.guideFlowState,
     required this.verificationModeEnabled,
     required this.verificationDecision,
     required this.onEnabledChanged,
@@ -1194,7 +1195,7 @@ class _AiVisionAssistPanel extends StatelessWidget {
   final bool isLive;
   final AiVisionAssistController controller;
   final DateTime now;
-  final bool guideFlowConfirmed;
+  final GuideFlowChecklistState guideFlowState;
   final bool verificationModeEnabled;
   final AiHazardDecision? verificationDecision;
   final ValueChanged<bool> onEnabledChanged;
@@ -1234,13 +1235,15 @@ class _AiVisionAssistPanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.visibility),
-              title: const Text('AI 보조 안내'),
-              subtitle: Text(_statusText),
-              value: enabled,
-              onChanged: canUse && guideFlowConfirmed ? onEnabledChanged : null,
+            AiAssistGateSwitchTile(
+              enabled: enabled,
+              canUse: canUse,
+              isLive: isLive,
+              guideFlowState: guideFlowState,
+              verificationModeEnabled: verificationModeEnabled,
+              isAnalyzing: controller.isAnalyzing,
+              isRunning: controller.isRunning,
+              onChanged: onEnabledChanged,
             ),
             if (enabled) ...[
               Wrap(
@@ -1335,28 +1338,6 @@ class _AiVisionAssistPanel extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String get _statusText {
-    if (!canUse) {
-      return '러닝 가이드의 전방 카메라 모드에서 사용할 수 있습니다.';
-    }
-    if (!guideFlowConfirmed) {
-      return 'WebRTC 영상, 가이드 음성, cue 버튼, 채팅 TTS, 정지/재개 확인 후 사용할 수 있습니다.';
-    }
-    if (!enabled) {
-      return '카메라 영상에서 가까운 물체를 감지하면 음성으로 알려줍니다.';
-    }
-    if (verificationModeEnabled) {
-      return '검증 모드입니다. 카메라 분석 없이 큐 흐름만 확인합니다.';
-    }
-    if (controller.isAnalyzing) {
-      return '분석 중';
-    }
-    if (controller.isRunning && isLive) {
-      return '실시간 보조 중';
-    }
-    return '라이브 시작 후 자동으로 동작합니다.';
   }
 }
 
@@ -1626,30 +1607,11 @@ class _FieldTestStatusPanel extends StatelessWidget {
               _FieldTestStatusRow(item: item),
               const SizedBox(height: 8),
             ],
-            Text('가이드 흐름 세부 확인', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 4),
-            Text(
-              '러너가 정지한 상태에서 각 항목을 따로 확인합니다.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+            GuideFlowChecklistSection(
+              state: _guideFlowState,
+              enabled: _canConfirmGuideFlow,
+              onItemChanged: onGuideFlowChecklistItemChanged,
             ),
-            const SizedBox(height: 4),
-            for (final checklistItem in GuideFlowChecklistState.items)
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                secondary: Icon(checklistItem.icon),
-                title: Text(checklistItem.label),
-                subtitle: Text(checklistItem.detail),
-                value: _guideFlowState.contains(checklistItem),
-                onChanged: _canConfirmGuideFlow
-                    ? (value) => onGuideFlowChecklistItemChanged(
-                          checklistItem,
-                          value ?? false,
-                        )
-                    : null,
-              ),
             DecoratedBox(
               decoration: BoxDecoration(
                 color: _stateColor(context, nextAction.state).withValues(
