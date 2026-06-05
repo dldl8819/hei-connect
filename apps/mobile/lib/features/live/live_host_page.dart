@@ -9,6 +9,8 @@ import '../../core/safety/voice_cues.dart';
 import '../ai/ai_vision_assist_controller.dart';
 import '../ai/ai_vision_models.dart';
 import 'field_test_mode.dart';
+import 'field_test_result_record.dart';
+import 'field_test_result_record_view.dart';
 import 'field_test_start_checklist.dart';
 import 'field_test_start_checklist_view.dart';
 import 'guide_flow_accessibility_widgets.dart';
@@ -45,6 +47,12 @@ class _LiveHostPageState extends State<LiveHostPage> {
       TextEditingController();
   final TextEditingController _fieldTestReproductionStepsController =
       TextEditingController();
+  final TextEditingController _fieldTestResultStepController =
+      TextEditingController();
+  final TextEditingController _fieldTestResultObservationController =
+      TextEditingController();
+  final TextEditingController _fieldTestResultNextActionController =
+      TextEditingController();
   final CueSpeaker _cueSpeaker = CueSpeaker();
   final ScreenAwake _screenAwake = ScreenAwake();
   late final LiveWebRtcController _webRtc;
@@ -62,6 +70,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   bool _hasReportedConnectionLoss = false;
   bool _fieldTestModeActive = false;
   bool _fieldTestSensitiveInfoRemoved = false;
+  bool _fieldTestResultRetestNeeded = false;
   bool _requiresResumeConfirmation = false;
   String? _errorMessage;
   Channel? _channel;
@@ -70,6 +79,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   DateTime _statusNow = DateTime.now();
   AiHazardDecision? _lastAiVerificationDecision;
   FieldTestModeSummary? _lastFieldTestSummary;
+  FieldTestResultOutcome? _fieldTestResultOutcome;
   final Set<_PreRunChecklistItem> _confirmedPreRunItems =
       <_PreRunChecklistItem>{};
   final Set<GuideFlowChecklistItem> _confirmedGuideFlowItems =
@@ -109,6 +119,9 @@ class _LiveHostPageState extends State<LiveHostPage> {
     _fieldTestExpectedResultController.dispose();
     _fieldTestActualResultController.dispose();
     _fieldTestReproductionStepsController.dispose();
+    _fieldTestResultStepController.dispose();
+    _fieldTestResultObservationController.dispose();
+    _fieldTestResultNextActionController.dispose();
     _stopCuePolling();
     _statusTicker?.cancel();
     unawaited(_cueSpeaker.stop());
@@ -363,6 +376,19 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           onSensitiveInfoRemovedChanged:
                               _setFieldTestSensitiveInfoRemoved,
                           onMemoChanged: _refreshFieldTestMemoPreview,
+                          resultRecord: _fieldTestResultRecord,
+                          selectedResultOutcome: _fieldTestResultOutcome,
+                          resultStepController: _fieldTestResultStepController,
+                          resultObservationController:
+                              _fieldTestResultObservationController,
+                          resultNextActionController:
+                              _fieldTestResultNextActionController,
+                          resultRetestNeeded: _fieldTestResultRetestNeeded,
+                          onResultOutcomeChanged: _setFieldTestResultOutcome,
+                          onResultRetestNeededChanged:
+                              _setFieldTestResultRetestNeeded,
+                          onResultTextChanged:
+                              _refreshFieldTestResultRecordPreview,
                           onStart: _startFieldTestMode,
                           onEnd: _endFieldTestMode,
                           onDismissSummary: _dismissFieldTestSummary,
@@ -548,6 +574,16 @@ class _LiveHostPageState extends State<LiveHostPage> {
     );
   }
 
+  FieldTestResultRecord get _fieldTestResultRecord {
+    return FieldTestResultRecord.fromInput(
+      outcome: _fieldTestResultOutcome,
+      step: _fieldTestResultStepController.text,
+      observation: _fieldTestResultObservationController.text,
+      nextAction: _fieldTestResultNextActionController.text,
+      retestNeeded: _fieldTestResultRetestNeeded,
+    );
+  }
+
   TestExecutionChecklistState get _testExecutionChecklistState {
     return TestExecutionChecklistState(_completedTestExecutionItems);
   }
@@ -703,6 +739,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
     _lastFieldTestSummary = null;
     _completedFieldTestStartItems.clear();
     _clearFieldTestMemo();
+    _clearFieldTestResultRecord();
   }
 
   void _clearFieldTestMemo() {
@@ -711,6 +748,14 @@ class _LiveHostPageState extends State<LiveHostPage> {
     _fieldTestActualResultController.clear();
     _fieldTestReproductionStepsController.clear();
     _fieldTestSensitiveInfoRemoved = false;
+  }
+
+  void _clearFieldTestResultRecord() {
+    _fieldTestResultOutcome = null;
+    _fieldTestResultStepController.clear();
+    _fieldTestResultObservationController.clear();
+    _fieldTestResultNextActionController.clear();
+    _fieldTestResultRetestNeeded = false;
   }
 
   void _startFieldTestMode() {
@@ -729,6 +774,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
     setState(() {
       _fieldTestModeActive = true;
       _lastFieldTestSummary = null;
+      _clearFieldTestResultRecord();
       _errorMessage = null;
     });
   }
@@ -747,6 +793,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
     setState(() {
       _lastFieldTestSummary = null;
       _clearFieldTestMemo();
+      _clearFieldTestResultRecord();
     });
   }
 
@@ -754,7 +801,25 @@ class _LiveHostPageState extends State<LiveHostPage> {
     setState(() => _fieldTestSensitiveInfoRemoved = checked);
   }
 
+  void _setFieldTestResultOutcome(FieldTestResultOutcome? outcome) {
+    setState(() {
+      _fieldTestResultOutcome = outcome;
+      _errorMessage = null;
+    });
+  }
+
+  void _setFieldTestResultRetestNeeded(bool checked) {
+    setState(() {
+      _fieldTestResultRetestNeeded = checked;
+      _errorMessage = null;
+    });
+  }
+
   void _refreshFieldTestMemoPreview() {
+    setState(() {});
+  }
+
+  void _refreshFieldTestResultRecordPreview() {
     setState(() {});
   }
 
@@ -2595,6 +2660,15 @@ class _FieldTestModePanel extends StatelessWidget {
     required this.sensitiveInfoRemoved,
     required this.onSensitiveInfoRemovedChanged,
     required this.onMemoChanged,
+    required this.resultRecord,
+    required this.selectedResultOutcome,
+    required this.resultStepController,
+    required this.resultObservationController,
+    required this.resultNextActionController,
+    required this.resultRetestNeeded,
+    required this.onResultOutcomeChanged,
+    required this.onResultRetestNeededChanged,
+    required this.onResultTextChanged,
     required this.onStart,
     required this.onEnd,
     required this.onDismissSummary,
@@ -2621,6 +2695,15 @@ class _FieldTestModePanel extends StatelessWidget {
   final bool sensitiveInfoRemoved;
   final ValueChanged<bool> onSensitiveInfoRemovedChanged;
   final VoidCallback onMemoChanged;
+  final FieldTestResultRecord resultRecord;
+  final FieldTestResultOutcome? selectedResultOutcome;
+  final TextEditingController resultStepController;
+  final TextEditingController resultObservationController;
+  final TextEditingController resultNextActionController;
+  final bool resultRetestNeeded;
+  final ValueChanged<FieldTestResultOutcome?> onResultOutcomeChanged;
+  final ValueChanged<bool> onResultRetestNeededChanged;
+  final VoidCallback onResultTextChanged;
   final VoidCallback onStart;
   final VoidCallback onEnd;
   final VoidCallback onDismissSummary;
@@ -2685,6 +2768,18 @@ class _FieldTestModePanel extends StatelessWidget {
                 onSensitiveInfoRemovedChanged: onSensitiveInfoRemovedChanged,
                 onMemoChanged: onMemoChanged,
                 onDismiss: onDismissSummary,
+              ),
+              const SizedBox(height: 12),
+              FieldTestResultRecordView(
+                record: resultRecord,
+                selectedOutcome: selectedResultOutcome,
+                stepController: resultStepController,
+                observationController: resultObservationController,
+                nextActionController: resultNextActionController,
+                retestNeeded: resultRetestNeeded,
+                onOutcomeChanged: onResultOutcomeChanged,
+                onRetestNeededChanged: onResultRetestNeededChanged,
+                onTextChanged: onResultTextChanged,
               ),
             ],
           ],
