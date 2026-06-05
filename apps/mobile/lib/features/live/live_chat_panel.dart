@@ -12,12 +12,22 @@ class LiveChatPanel extends StatefulWidget {
     required this.session,
     required this.senderRole,
     this.onNewMessages,
+    this.onMessageSent,
+    this.title = '채팅',
+    this.description,
+    this.emptyText = '아직 메시지가 없습니다.',
+    this.inputLabel = '짧은 메시지',
   });
 
   final LiveSessionApi api;
   final LiveSession session;
   final ChatSenderRole senderRole;
   final ValueChanged<List<LiveChatMessage>>? onNewMessages;
+  final ValueChanged<LiveChatMessage>? onMessageSent;
+  final String title;
+  final String? description;
+  final String emptyText;
+  final String inputLabel;
 
   @override
   State<LiveChatPanel> createState() => _LiveChatPanelState();
@@ -69,10 +79,19 @@ class _LiveChatPanelState extends State<LiveChatPanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('채팅', style: Theme.of(context).textTheme.titleMedium),
+            Text(widget.title, style: Theme.of(context).textTheme.titleMedium),
+            if (widget.description != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                widget.description!,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
             const SizedBox(height: 8),
             if (_messages.isEmpty)
-              const Text('아직 메시지가 없습니다.')
+              Text(widget.emptyText)
             else
               for (final message in _messages.reversed)
                 Padding(
@@ -99,8 +118,7 @@ class _LiveChatPanelState extends State<LiveChatPanel> {
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
                 counterText: '',
-                labelText: '짧은 메시지',
-              ),
+              ).copyWith(labelText: widget.inputLabel),
               onSubmitted: (_) {
                 if (!_isSending) {
                   unawaited(_sendMessage());
@@ -190,6 +208,7 @@ class _LiveChatPanelState extends State<LiveChatPanel> {
 
       _messageController.clear();
       _lastDeliveredSequence = message.sequence;
+      widget.onMessageSent?.call(message);
       setState(() {
         _messages = _takeRecentMessages([..._messages, message]);
       });

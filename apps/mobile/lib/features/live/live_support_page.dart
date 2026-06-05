@@ -5,12 +5,15 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/safety/screen_awake.dart';
 import '../../core/safety/voice_cues.dart';
+import 'guide_flow_accessibility_widgets.dart';
+import 'guide_flow_checklist.dart';
 import 'live_invite_parser.dart';
 import 'live_chat_panel.dart';
 import 'live_models.dart';
 import 'live_session_api.dart';
 import 'live_signaling_models.dart';
 import 'live_webrtc_controller.dart';
+import 'support_guide_flow.dart';
 
 class LiveSupportPage extends StatefulWidget {
   const LiveSupportPage({super.key, this.initialInvite});
@@ -39,6 +42,10 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
   SignalState? _signalState;
   List<GuidanceCueEvent> _recentCueEvents = const [];
   VoiceCue _selectedCue = VoiceCue.stopNow;
+  int _lastStopCueSequence = 0;
+  int _lastResumeConfirmedCueSequence = 0;
+  final Set<GuideFlowChecklistItem> _confirmedGuideFlowItems =
+      <GuideFlowChecklistItem>{};
 
   @override
   void initState() {
@@ -100,6 +107,23 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
               },
             ),
             const SizedBox(height: 12),
+            if (_session?.purpose == LiveSessionPurpose.runningGuide) ...[
+              AnimatedBuilder(
+                animation: _webRtc,
+                builder: (context, _) {
+                  return _SupportGuideControlPanel(
+                    flowState: _supportGuideFlowState,
+                    guideFlowState: _guideFlowState,
+                    isSendingCue: _isSendingCue,
+                    selectedCue: _selectedCue,
+                    onCueSelected: (cue) => unawaited(_sendCue(cue)),
+                    onResumeConfirmed: _confirmResumeAfterStop,
+                    onGuideFlowChecklistItemChanged: _setGuideFlowChecklistItem,
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
             AnimatedBuilder(
               animation: _webRtc,
               builder: (context, _) => _LiveRoomStatus(
@@ -131,17 +155,30 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
                 api: _api,
                 session: _session!,
                 senderRole: ChatSenderRole.supporter,
+                title: _session!.purpose == LiveSessionPurpose.runningGuide
+                    ? '짧은 채팅 TTS'
+                    : '채팅',
+                description:
+                    _session!.purpose == LiveSessionPurpose.runningGuide
+                        ? '말하기 어려울 때 짧게 보냅니다. 러너에게 TTS로 들렸는지 확인한 뒤 체크합니다.'
+                        : null,
+                inputLabel: _session!.purpose == LiveSessionPurpose.runningGuide
+                    ? 'TTS로 보낼 짧은 안내'
+                    : '짧은 메시지',
               ),
             ],
-            const SizedBox(height: 16),
-            _CueGrid(
-              enabled: hasSession && !_isSendingCue,
-              selectedCue: _selectedCue,
-              onSelected: (cue) => unawaited(_sendCue(cue)),
-            ),
-            if (_isSendingCue) ...[
-              const SizedBox(height: 8),
-              const Text('큐 전송 중'),
+            if (hasSession &&
+                _session?.purpose != LiveSessionPurpose.runningGuide) ...[
+              const SizedBox(height: 16),
+              _CueGrid(
+                enabled: !_isSendingCue,
+                selectedCue: _selectedCue,
+                onSelected: (cue) => unawaited(_sendCue(cue)),
+              ),
+              if (_isSendingCue) ...[
+                const SizedBox(height: 8),
+                const Text('큐 전송 중'),
+              ],
             ],
           ],
         ),
@@ -179,6 +216,9 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
             _hasReportedConnectionLoss = false;
             _errorMessage = null;
             _selectedCue = VoiceCue.holdPace;
+            _lastStopCueSequence = 0;
+            _lastResumeConfirmedCueSequence = 0;
+            _confirmedGuideFlowItems.clear();
           });
           _startCueHistoryPolling(session);
         case InviteTargetKind.channel:
@@ -194,6 +234,9 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
             _recentCueEvents = const [];
             _hasReportedConnectionLoss = false;
             _selectedCue = VoiceCue.stopNow;
+            _lastStopCueSequence = 0;
+            _lastResumeConfirmedCueSequence = 0;
+            _confirmedGuideFlowItems.clear();
           });
           _stopCueHistoryPolling();
       }
@@ -304,6 +347,9 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
       }
 
       setState(() {
+        if (cue == VoiceCue.stopNow) {
+          _lastStopCueSequence = event.sequence;
+        }
         _recentCueEvents = _takeRecentCueEvents([
           ..._recentCueEvents,
           event,
@@ -347,6 +393,7 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
       }
 
       setState(() {
+        _lastStopCueSequence = _latestStopCueSequence(events);
         _recentCueEvents = _takeRecentCueEvents(events);
       });
     } on LiveSessionApiException catch (error) {
@@ -366,6 +413,67 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
     return List<GuidanceCueEvent>.unmodifiable(
       events.sublist(events.length - 5),
     );
+  }
+
+  int _latestStopCueSequence(List<GuidanceCueEvent> events) {
+    var latest = _lastStopCueSequence;
+    for (final event in events) {
+      if (event.cue == VoiceCue.stopNow && event.sequence > latest) {
+        latest = event.sequence;
+      }
+    }
+    return latest;
+  }
+
+  GuideFlowChecklistState get _guideFlowState {
+    return GuideFlowChecklistState(_confirmedGuideFlowItems);
+  }
+
+  SupportGuideFlowState get _supportGuideFlowState {
+    final connectionLost = _webRtc.safetyStopRequired ||
+        _webRtc.phase == WebRtcPhase.connectionLost ||
+        _webRtc.phase == WebRtcPhase.failed;
+    return SupportGuideFlowState(
+      isRunningGuide: _session?.purpose == LiveSessionPurpose.runningGuide,
+      webRtcConnected: _webRtc.phase == WebRtcPhase.connected,
+      connectionLost: connectionLost,
+      guideFlowState: _guideFlowState,
+      stopCueAwaitingResume:
+          _lastStopCueSequence > _lastResumeConfirmedCueSequence,
+    );
+  }
+
+  void _setGuideFlowChecklistItem(
+    GuideFlowChecklistItem item,
+    bool checked,
+  ) {
+    final flowState = _supportGuideFlowState;
+    if (checked && !flowState.canCheckGuideFlow) {
+      setState(() {
+        _confirmedGuideFlowItems.remove(item);
+        _errorMessage = '방송 연결 후 러너가 정지한 상태에서 확인해 주세요.';
+      });
+      return;
+    }
+
+    setState(() {
+      final nextState = _guideFlowState.updateItem(item, checked);
+      _confirmedGuideFlowItems
+        ..clear()
+        ..addAll(nextState.confirmedItems);
+      _errorMessage = null;
+    });
+  }
+
+  void _confirmResumeAfterStop() {
+    if (_lastStopCueSequence <= _lastResumeConfirmedCueSequence) {
+      return;
+    }
+
+    setState(() {
+      _lastResumeConfirmedCueSequence = _lastStopCueSequence;
+      _errorMessage = null;
+    });
   }
 
   void _handleWebRtcChanged() {
@@ -399,6 +507,9 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
 
     setState(() {
       _selectedCue = nextCue;
+      if (nextCue == VoiceCue.stopNow && _lastStopCueSequence == 0) {
+        _lastStopCueSequence = _lastResumeConfirmedCueSequence + 1;
+      }
       _errorMessage = _webRtc.errorMessage;
     });
     unawaited(_screenAwake.allowSleep());
@@ -418,6 +529,308 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
 
       setState(() => _errorMessage = error.message);
     }
+  }
+}
+
+class _SupportGuideControlPanel extends StatelessWidget {
+  const _SupportGuideControlPanel({
+    required this.flowState,
+    required this.guideFlowState,
+    required this.isSendingCue,
+    required this.selectedCue,
+    required this.onCueSelected,
+    required this.onResumeConfirmed,
+    required this.onGuideFlowChecklistItemChanged,
+  });
+
+  final SupportGuideFlowState flowState;
+  final GuideFlowChecklistState guideFlowState;
+  final bool isSendingCue;
+  final VoiceCue selectedCue;
+  final ValueChanged<VoiceCue> onCueSelected;
+  final VoidCallback onResumeConfirmed;
+  final void Function(GuideFlowChecklistItem item, bool checked)
+      onGuideFlowChecklistItemChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('가이드 조작 패널', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              '원격 가이드와 AI 보조는 보조 기능입니다. 통제 경로 + 백업 동행자 기준을 유지합니다.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 10),
+            Semantics(
+              liveRegion: true,
+              label: flowState.talkBackSummary,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        flowState.nextActionTitle,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(flowState.nextActionDetail),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (flowState.requiresSafetyHold) ...[
+              const SizedBox(height: 10),
+              _SupportSafetyHoldPanel(flowState: flowState),
+            ],
+            const SizedBox(height: 12),
+            _PrimaryGuideCueGrid(
+              enabled: !isSendingCue,
+              selectedCue: selectedCue,
+              resumeEnabled: flowState.stopCueAwaitingResume &&
+                  !flowState.connectionLost &&
+                  !isSendingCue,
+              onCueSelected: onCueSelected,
+              onResumeConfirmed: onResumeConfirmed,
+            ),
+            const SizedBox(height: 8),
+            _SecondaryGuideCueWrap(
+              enabled: !isSendingCue,
+              selectedCue: selectedCue,
+              onCueSelected: onCueSelected,
+            ),
+            if (isSendingCue) ...[
+              const SizedBox(height: 8),
+              const Text('큐 전송 중'),
+            ],
+            const SizedBox(height: 12),
+            GuideFlowChecklistSection(
+              state: guideFlowState,
+              enabled: flowState.canCheckGuideFlow,
+              onItemChanged: onGuideFlowChecklistItemChanged,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SupportSafetyHoldPanel extends StatelessWidget {
+  const _SupportSafetyHoldPanel({required this.flowState});
+
+  final SupportGuideFlowState flowState;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '정지 후 확인 필요',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: colorScheme.onErrorContainer,
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            for (final action in flowState.safetyActions)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  action,
+                  style: TextStyle(color: colorScheme.onErrorContainer),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PrimaryGuideCueGrid extends StatelessWidget {
+  const _PrimaryGuideCueGrid({
+    required this.enabled,
+    required this.selectedCue,
+    required this.resumeEnabled,
+    required this.onCueSelected,
+    required this.onResumeConfirmed,
+  });
+
+  final bool enabled;
+  final VoiceCue selectedCue;
+  final bool resumeEnabled;
+  final ValueChanged<VoiceCue> onCueSelected;
+  final VoidCallback onResumeConfirmed;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      crossAxisSpacing: 8,
+      mainAxisSpacing: 8,
+      childAspectRatio: 2.8,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        _GuideCueButton(
+          icon: Icons.directions_walk,
+          label: '감속',
+          selected: selectedCue == VoiceCue.slowDown,
+          enabled: enabled,
+          onPressed: () => onCueSelected(VoiceCue.slowDown),
+        ),
+        _GuideCueButton(
+          icon: Icons.check_circle,
+          label: '유지',
+          selected: selectedCue == VoiceCue.holdPace,
+          enabled: enabled,
+          onPressed: () => onCueSelected(VoiceCue.holdPace),
+        ),
+        _GuideCueButton(
+          icon: Icons.report,
+          label: '정지',
+          selected: selectedCue == VoiceCue.stopNow,
+          enabled: enabled,
+          danger: true,
+          onPressed: () => onCueSelected(VoiceCue.stopNow),
+        ),
+        _GuideCueButton(
+          icon: Icons.restart_alt,
+          label: '재개 확인',
+          selected: false,
+          enabled: resumeEnabled,
+          onPressed: onResumeConfirmed,
+        ),
+      ],
+    );
+  }
+}
+
+class _SecondaryGuideCueWrap extends StatelessWidget {
+  const _SecondaryGuideCueWrap({
+    required this.enabled,
+    required this.selectedCue,
+    required this.onCueSelected,
+  });
+
+  final bool enabled;
+  final VoiceCue selectedCue;
+  final ValueChanged<VoiceCue> onCueSelected;
+
+  static const _cues = [
+    VoiceCue.keepStraight,
+    VoiceCue.leftSmall,
+    VoiceCue.rightSmall,
+    VoiceCue.obstacleAhead,
+    VoiceCue.personAhead,
+    VoiceCue.curbAhead,
+    VoiceCue.narrowPath,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final cue in _cues)
+          _CompactCueButton(
+            cue: cue,
+            selected: cue == selectedCue,
+            enabled: enabled,
+            onPressed: () => onCueSelected(cue),
+          ),
+      ],
+    );
+  }
+}
+
+class _GuideCueButton extends StatelessWidget {
+  const _GuideCueButton({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.enabled,
+    required this.onPressed,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onPressed;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = danger ? colorScheme.error : colorScheme.primary;
+    return OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: danger ? colorScheme.error : null,
+        backgroundColor: selected ? colorScheme.secondaryContainer : null,
+        side: BorderSide(color: selected ? color : colorScheme.outline),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      onPressed: enabled ? onPressed : null,
+      icon: Icon(icon),
+      label: Text(label, textAlign: TextAlign.center),
+    );
+  }
+}
+
+class _CompactCueButton extends StatelessWidget {
+  const _CompactCueButton({
+    required this.cue,
+    required this.selected,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final VoiceCue cue;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ActionChip(
+      avatar: selected ? const Icon(Icons.check, size: 16) : null,
+      label: Text(cue.label),
+      onPressed: enabled ? onPressed : null,
+      backgroundColor:
+          selected ? Theme.of(context).colorScheme.secondaryContainer : null,
+    );
   }
 }
 
@@ -597,9 +1010,7 @@ class _LiveRoomStatus extends StatelessWidget {
             ),
             if (session != null) ...[
               const SizedBox(height: 12),
-              SelectableText('참여 코드: ${session!.joinCode}'),
-              const SizedBox(height: 4),
-              SelectableText('참여 링크: ${session!.joinLink}'),
+              const Text('참여 정보는 입장 후 상태 요약에 다시 표시하지 않습니다.'),
               if (session!.runnerVisionMode != null) ...[
                 const SizedBox(height: 4),
                 Text('러너 모드: ${session!.runnerVisionMode!.label}'),
@@ -629,9 +1040,7 @@ class _LiveRoomStatus extends StatelessWidget {
               ],
             ] else if (channel != null) ...[
               const SizedBox(height: 12),
-              SelectableText('채널 코드: ${channel!.channelCode}'),
-              const SizedBox(height: 4),
-              SelectableText('채널 링크: ${channel!.channelLink}'),
+              const Text('채널 참여 정보는 입장 후 상태 요약에 다시 표시하지 않습니다.'),
             ],
           ],
         ),
