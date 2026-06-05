@@ -9,6 +9,8 @@ import '../../core/safety/voice_cues.dart';
 import '../ai/ai_vision_assist_controller.dart';
 import '../ai/ai_vision_models.dart';
 import 'field_test_mode.dart';
+import 'field_test_start_checklist.dart';
+import 'field_test_start_checklist_view.dart';
 import 'guide_flow_accessibility_widgets.dart';
 import 'guide_flow_checklist.dart';
 import 'live_chat_panel.dart';
@@ -74,6 +76,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
       <GuideFlowChecklistItem>{};
   final Set<TestExecutionChecklistItem> _completedTestExecutionItems =
       <TestExecutionChecklistItem>{};
+  final Set<FieldTestStartChecklistItem> _completedFieldTestStartItems =
+      <FieldTestStartChecklistItem>{};
   List<GuidanceCueEvent> _recentCueEvents = const [];
   int _lastCueSequence = 0;
   VoiceCue _lastCue = VoiceCue.stopNow;
@@ -339,6 +343,9 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           executionChecklistState: _testExecutionChecklistState,
                           onExecutionChecklistItemChanged:
                               _setTestExecutionChecklistItem,
+                          startChecklistState: _fieldTestStartChecklistState,
+                          onStartChecklistItemChanged:
+                              _setFieldTestStartChecklistItem,
                           progressGuardState: _runnerTestProgressGuardState,
                           report: _fieldTestSessionReport,
                           active: _fieldTestModeActive,
@@ -545,6 +552,10 @@ class _LiveHostPageState extends State<LiveHostPage> {
     return TestExecutionChecklistState(_completedTestExecutionItems);
   }
 
+  FieldTestStartChecklistState get _fieldTestStartChecklistState {
+    return FieldTestStartChecklistState(_completedFieldTestStartItems);
+  }
+
   RunnerTestProgressGuardState get _runnerTestProgressGuardState {
     return RunnerTestProgressGuardState(
       isLive: _isLive,
@@ -636,6 +647,19 @@ class _LiveHostPageState extends State<LiveHostPage> {
     });
   }
 
+  void _setFieldTestStartChecklistItem(
+    FieldTestStartChecklistItem item,
+    bool checked,
+  ) {
+    setState(() {
+      final nextState = _fieldTestStartChecklistState.updateItem(item, checked);
+      _completedFieldTestStartItems
+        ..clear()
+        ..addAll(nextState.completedItems);
+      _errorMessage = null;
+    });
+  }
+
   void _setGuideFlowChecklistItem(
     GuideFlowChecklistItem item,
     bool checked,
@@ -677,6 +701,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   void _clearFieldTestModeState() {
     _fieldTestModeActive = false;
     _lastFieldTestSummary = null;
+    _completedFieldTestStartItems.clear();
     _clearFieldTestMemo();
   }
 
@@ -695,6 +720,12 @@ class _LiveHostPageState extends State<LiveHostPage> {
       return;
     }
 
+    final startChecklistState = _fieldTestStartChecklistState;
+    if (!startChecklistState.canStart) {
+      setState(() => _errorMessage = startChecklistState.blockedReason);
+      return;
+    }
+
     setState(() {
       _fieldTestModeActive = true;
       _lastFieldTestSummary = null;
@@ -706,6 +737,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
     setState(() {
       _fieldTestModeActive = false;
       _lastFieldTestSummary = _fieldTestModeSnapshot.toSummary();
+      _completedFieldTestStartItems.clear();
       _clearFieldTestMemo();
       _errorMessage = null;
     });
@@ -2549,6 +2581,8 @@ class _FieldTestModePanel extends StatelessWidget {
     required this.testOrderState,
     required this.executionChecklistState,
     required this.onExecutionChecklistItemChanged,
+    required this.startChecklistState,
+    required this.onStartChecklistItemChanged,
     required this.progressGuardState,
     required this.report,
     required this.active,
@@ -2572,6 +2606,9 @@ class _FieldTestModePanel extends StatelessWidget {
   final TestExecutionChecklistState executionChecklistState;
   final void Function(TestExecutionChecklistItem item, bool checked)
       onExecutionChecklistItemChanged;
+  final FieldTestStartChecklistState startChecklistState;
+  final void Function(FieldTestStartChecklistItem item, bool checked)
+      onStartChecklistItemChanged;
   final RunnerTestProgressGuardState progressGuardState;
   final TestSessionReport report;
   final bool active;
@@ -2622,8 +2659,18 @@ class _FieldTestModePanel extends StatelessWidget {
             const SizedBox(height: 12),
             if (active)
               _ActiveFieldTestModeSummary(snapshot: snapshot, onEnd: onEnd)
-            else
-              _FieldTestModeStartArea(gate: gate, onStart: onStart),
+            else ...[
+              FieldTestStartChecklistView(
+                state: startChecklistState,
+                onItemChanged: onStartChecklistItemChanged,
+              ),
+              const SizedBox(height: 12),
+              _FieldTestModeStartArea(
+                gate: gate,
+                startChecklistState: startChecklistState,
+                onStart: onStart,
+              ),
+            ],
             if (!active && lastSummary != null) ...[
               const SizedBox(height: 12),
               _FieldTestModeSummaryView(
@@ -2791,25 +2838,33 @@ class _FieldTestDeviceOrderStepRow extends StatelessWidget {
 class _FieldTestModeStartArea extends StatelessWidget {
   const _FieldTestModeStartArea({
     required this.gate,
+    required this.startChecklistState,
     required this.onStart,
   });
 
   final FieldTestModeStartGate gate;
+  final FieldTestStartChecklistState startChecklistState;
   final VoidCallback onStart;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final canStart = gate.canStart && startChecklistState.canStart;
+    final statusLabel = canStart
+        ? '실기기 테스트 모드를 시작할 수 있습니다.'
+        : gate.canStart
+            ? startChecklistState.blockedReason
+            : gate.statusLabel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Semantics(
           liveRegion: true,
-          label: gate.statusLabel,
+          label: statusLabel,
           child: Text(
-            gate.statusLabel,
+            statusLabel,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: gate.canStart
+                  color: canStart
                       ? colorScheme.primary
                       : colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w700,
@@ -2823,7 +2878,7 @@ class _FieldTestModeStartArea extends StatelessWidget {
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
-          onPressed: gate.canStart ? onStart : null,
+          onPressed: canStart ? onStart : null,
           icon: const Icon(Icons.play_circle),
           label: const Text('현장 테스트 모드 시작'),
         ),
