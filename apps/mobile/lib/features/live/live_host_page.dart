@@ -8,6 +8,7 @@ import '../../core/safety/screen_awake.dart';
 import '../../core/safety/voice_cues.dart';
 import '../ai/ai_vision_assist_controller.dart';
 import '../ai/ai_vision_models.dart';
+import 'guide_flow_checklist.dart';
 import 'live_chat_panel.dart';
 import 'live_session_api.dart';
 import 'live_models.dart';
@@ -48,8 +49,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
   AiHazardDecision? _lastAiVerificationDecision;
   final Set<_PreRunChecklistItem> _confirmedPreRunItems =
       <_PreRunChecklistItem>{};
-  final Set<_GuideFlowChecklistItem> _confirmedGuideFlowItems =
-      <_GuideFlowChecklistItem>{};
+  final Set<GuideFlowChecklistItem> _confirmedGuideFlowItems =
+      <GuideFlowChecklistItem>{};
   List<GuidanceCueEvent> _recentCueEvents = const [];
   int _lastCueSequence = 0;
   VoiceCue _lastCue = VoiceCue.stopNow;
@@ -379,10 +380,11 @@ class _LiveHostPageState extends State<LiveHostPage> {
         _confirmedPreRunItems.length == _PreRunChecklistItem.values.length;
   }
 
-  bool get _isGuideFlowConfirmed {
-    return _confirmedGuideFlowItems.length ==
-        _GuideFlowChecklistItem.values.length;
+  GuideFlowChecklistState get _guideFlowState {
+    return GuideFlowChecklistState(_confirmedGuideFlowItems);
   }
+
+  bool get _isGuideFlowConfirmed => _guideFlowState.allowsAiAssist;
 
   bool get _canConfirmGuideFlowChecks {
     return _isLive &&
@@ -401,7 +403,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   }
 
   void _setGuideFlowChecklistItem(
-    _GuideFlowChecklistItem item,
+    GuideFlowChecklistItem item,
     bool checked,
   ) {
     if (checked &&
@@ -409,18 +411,17 @@ class _LiveHostPageState extends State<LiveHostPage> {
             _session?.purpose != LiveSessionPurpose.runningGuide)) {
       setState(() {
         _confirmedGuideFlowItems.remove(item);
-        _errorMessage = '라이브 연결, WebRTC 영상, 가이드 음성 흐름을 먼저 확인해 주세요.';
+        _errorMessage = '라이브 연결 후 가이드 흐름 5개 항목을 정지 상태에서 확인해 주세요.';
       });
       return;
     }
 
     setState(() {
-      if (checked) {
-        _confirmedGuideFlowItems.add(item);
-      } else {
-        _confirmedGuideFlowItems.remove(item);
-      }
-      if (!_isGuideFlowConfirmed) {
+      final nextGuideFlowState = _guideFlowState.updateItem(item, checked);
+      _confirmedGuideFlowItems
+        ..clear()
+        ..addAll(nextGuideFlowState.confirmedItems);
+      if (!nextGuideFlowState.allowsAiAssist) {
         _aiAssistEnabled = false;
         _aiVisionVerificationMode = false;
         _aiAssist.stop();
@@ -1405,47 +1406,14 @@ enum _FieldTestStatusState {
   blocked,
 }
 
-enum _GuideFlowChecklistItem {
-  webRtcVideo,
-  guideVoice,
-  cueButtons,
-  shortChatTts,
-  stopResume,
-}
-
-extension _GuideFlowChecklistItemText on _GuideFlowChecklistItem {
-  String get label {
-    return switch (this) {
-      _GuideFlowChecklistItem.webRtcVideo => 'WebRTC 영상 확인',
-      _GuideFlowChecklistItem.guideVoice => '가이드 음성',
-      _GuideFlowChecklistItem.cueButtons => 'cue 버튼',
-      _GuideFlowChecklistItem.shortChatTts => '짧은 채팅 TTS',
-      _GuideFlowChecklistItem.stopResume => '정지 큐 후 재개 확인',
-    };
-  }
-
-  String get detail {
-    return switch (this) {
-      _GuideFlowChecklistItem.webRtcVideo =>
-        '가이드 기기에서 눈앞 카메라 영상이 안정적으로 보이는지 확인합니다.',
-      _GuideFlowChecklistItem.guideVoice =>
-        '가이드의 짧은 음성 안내가 러너에게 명확히 들리는지 확인합니다.',
-      _GuideFlowChecklistItem.cueButtons =>
-        '감속, 유지, 정지 같은 cue 버튼 안내가 TTS로 전달되는지 확인합니다.',
-      _GuideFlowChecklistItem.shortChatTts =>
-        '가이드가 짧은 테스트 채팅을 보냈을 때 TTS가 읽어 주는지 확인합니다.',
-      _GuideFlowChecklistItem.stopResume =>
-        '정지 cue 뒤 러너가 멈추고 안전 확인 후에만 재개되는지 확인합니다.',
-    };
-  }
-
+extension _GuideFlowChecklistItemIcon on GuideFlowChecklistItem {
   IconData get icon {
     return switch (this) {
-      _GuideFlowChecklistItem.webRtcVideo => Icons.videocam,
-      _GuideFlowChecklistItem.guideVoice => Icons.record_voice_over,
-      _GuideFlowChecklistItem.cueButtons => Icons.touch_app,
-      _GuideFlowChecklistItem.shortChatTts => Icons.chat,
-      _GuideFlowChecklistItem.stopResume => Icons.pause_circle,
+      GuideFlowChecklistItem.webRtcVideo => Icons.videocam,
+      GuideFlowChecklistItem.guideVoice => Icons.record_voice_over,
+      GuideFlowChecklistItem.cueButtons => Icons.touch_app,
+      GuideFlowChecklistItem.shortChatTts => Icons.chat,
+      GuideFlowChecklistItem.stopResume => Icons.pause_circle,
     };
   }
 }
@@ -1540,8 +1508,8 @@ class _FieldTestStatusPanel extends StatelessWidget {
   final bool requiresResumeConfirmation;
   final WebRtcPhase webRtcPhase;
   final String? fieldErrorMessage;
-  final Set<_GuideFlowChecklistItem> confirmedGuideFlowItems;
-  final void Function(_GuideFlowChecklistItem item, bool checked)
+  final Set<GuideFlowChecklistItem> confirmedGuideFlowItems;
+  final void Function(GuideFlowChecklistItem item, bool checked)
       onGuideFlowChecklistItemChanged;
   final bool aiAssistEnabled;
   final bool aiVerificationMode;
@@ -1550,26 +1518,16 @@ class _FieldTestStatusPanel extends StatelessWidget {
   final DateTime now;
   final AiHazardDecision? verificationDecision;
 
-  bool get guideFlowConfirmed {
-    return confirmedGuideFlowItems.length ==
-        _GuideFlowChecklistItem.values.length;
+  GuideFlowChecklistState get _guideFlowState {
+    return GuideFlowChecklistState(confirmedGuideFlowItems);
   }
 
-  String get _guideFlowStatusLabel {
-    if (guideFlowConfirmed) {
-      return '확인 완료';
-    }
-    return '${confirmedGuideFlowItems.length}/${_GuideFlowChecklistItem.values.length} 확인';
-  }
+  bool get guideFlowConfirmed => _guideFlowState.allowsAiAssist;
 
-  _GuideFlowChecklistItem? get _nextMissingGuideFlowItem {
-    for (final item in _GuideFlowChecklistItem.values) {
-      if (!confirmedGuideFlowItems.contains(item)) {
-        return item;
-      }
-    }
-    return null;
-  }
+  String get _guideFlowStatusLabel => _guideFlowState.statusLabel;
+
+  GuideFlowChecklistItem? get _nextMissingGuideFlowItem =>
+      _guideFlowState.nextMissingItem;
 
   @override
   Widget build(BuildContext context) {
@@ -1677,14 +1635,14 @@ class _FieldTestStatusPanel extends StatelessWidget {
                   ),
             ),
             const SizedBox(height: 4),
-            for (final checklistItem in _GuideFlowChecklistItem.values)
+            for (final checklistItem in GuideFlowChecklistState.items)
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 secondary: Icon(checklistItem.icon),
                 title: Text(checklistItem.label),
                 subtitle: Text(checklistItem.detail),
-                value: confirmedGuideFlowItems.contains(checklistItem),
+                value: _guideFlowState.contains(checklistItem),
                 onChanged: _canConfirmGuideFlow
                     ? (value) => onGuideFlowChecklistItemChanged(
                           checklistItem,
@@ -2101,7 +2059,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
     if (!aiAssistEnabled) {
       return const _FieldTestNextAction(
         title: 'AI 보조 안내 스위치',
-        detail: '먼저 음성 안내와 정지 흐름을 확인한 뒤 AI 보조를 켭니다.',
+        detail: '가이드 흐름 5개 항목이 모두 확인된 상태에서만 AI 보조를 켭니다.',
         icon: Icons.visibility,
         state: _FieldTestStatusState.pending,
       );
