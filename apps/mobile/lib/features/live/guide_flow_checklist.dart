@@ -88,6 +88,9 @@ class GuideFlowChecklistState {
     if (item == null) {
       return '가이드 흐름 확인 완료';
     }
+    if (item.label.endsWith('확인')) {
+      return item.label;
+    }
     return '${item.label} 확인';
   }
 

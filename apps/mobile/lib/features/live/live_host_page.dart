@@ -8,6 +8,7 @@ import '../../core/safety/screen_awake.dart';
 import '../../core/safety/voice_cues.dart';
 import '../ai/ai_vision_assist_controller.dart';
 import '../ai/ai_vision_models.dart';
+import 'field_test_mode.dart';
 import 'guide_flow_accessibility_widgets.dart';
 import 'guide_flow_checklist.dart';
 import 'live_chat_panel.dart';
@@ -41,6 +42,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   bool _aiAssistEnabled = false;
   bool _aiVisionVerificationMode = false;
   bool _hasReportedConnectionLoss = false;
+  bool _fieldTestModeActive = false;
   bool _requiresResumeConfirmation = false;
   String? _errorMessage;
   Channel? _channel;
@@ -48,6 +50,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
   SignalState? _signalState;
   DateTime _statusNow = DateTime.now();
   AiHazardDecision? _lastAiVerificationDecision;
+  FieldTestModeSummary? _lastFieldTestSummary;
   final Set<_PreRunChecklistItem> _confirmedPreRunItems =
       <_PreRunChecklistItem>{};
   final Set<GuideFlowChecklistItem> _confirmedGuideFlowItems =
@@ -124,6 +127,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                     _purpose = purpose;
                     _confirmedPreRunItems.clear();
                     _clearGuideFlowChecks();
+                    _clearFieldTestModeState();
                     if (purpose == LiveSessionPurpose.runningGuide) {
                       _sourceMode = LiveSourceMode.worldCamera;
                     } else {
@@ -144,6 +148,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                       _runnerVisionMode = mode;
                       _confirmedPreRunItems.clear();
                       _clearGuideFlowChecks();
+                      _clearFieldTestModeState();
                     });
                   },
                 ),
@@ -156,6 +161,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                   setState(() {
                     _sourceMode = sourceMode;
                     _clearGuideFlowChecks();
+                    _clearFieldTestModeState();
                     if (_purpose == LiveSessionPurpose.runningGuide) {
                       _confirmedPreRunItems.clear();
                     }
@@ -259,6 +265,28 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           aiController: _aiAssist,
                           now: _statusNow,
                           verificationDecision: _lastAiVerificationDecision,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ],
+              if (_showsPreRunChecklist) ...[
+                const SizedBox(height: 16),
+                AnimatedBuilder(
+                  animation: _webRtc,
+                  builder: (context, _) {
+                    return AnimatedBuilder(
+                      animation: _aiAssist,
+                      builder: (context, _) {
+                        return _FieldTestModePanel(
+                          gate: _fieldTestModeStartGate,
+                          snapshot: _fieldTestModeSnapshot,
+                          active: _fieldTestModeActive,
+                          lastSummary: _lastFieldTestSummary,
+                          onStart: _startFieldTestMode,
+                          onEnd: _endFieldTestMode,
+                          onDismissSummary: _dismissFieldTestSummary,
                         );
                       },
                     );
@@ -387,6 +415,45 @@ class _LiveHostPageState extends State<LiveHostPage> {
 
   bool get _isGuideFlowConfirmed => _guideFlowState.allowsAiAssist;
 
+  FieldTestModeStartGate get _fieldTestModeStartGate {
+    final purpose = _session?.purpose ?? _purpose;
+    final sourceMode = _session?.sourceMode ?? _sourceMode;
+    return FieldTestModeStartGate(
+      isRunningGuide: purpose == LiveSessionPurpose.runningGuide,
+      isWorldCamera: sourceMode == LiveSourceMode.worldCamera,
+      runnerModeSelected: true,
+    );
+  }
+
+  FieldTestModeSnapshot get _fieldTestModeSnapshot {
+    return FieldTestModeSnapshot(
+      guideFlowState: _guideFlowState,
+      preRunChecklistComplete: _isPreRunChecklistComplete,
+      sessionCreated: _session != null,
+      isLive: _isLive,
+      webRtcConnected: _webRtc.phase == WebRtcPhase.connected,
+      webRtcStatusLabel: _webRtc.phase.label,
+      aiAssistStatusLabel: _fieldTestAiAssistStatusLabel,
+      aiAssistEnabled: _aiAssistEnabled,
+      aiVerificationMode: _aiVisionVerificationMode,
+      requiresResumeConfirmation: _requiresResumeConfirmation,
+      lastSafetyCueLabel: _lastCue.label,
+    );
+  }
+
+  String get _fieldTestAiAssistStatusLabel {
+    if (!_canUseAiVisionAssist) {
+      return '전방 카메라 필요';
+    }
+    if (!_isGuideFlowConfirmed) {
+      return _guideFlowState.aiAssistGateLabel;
+    }
+    if (_aiAssistEnabled) {
+      return _aiVisionVerificationMode ? '검증 모드' : '켜짐';
+    }
+    return '꺼짐';
+  }
+
   bool get _canConfirmGuideFlowChecks {
     return _isLive &&
         _webRtc.phase == WebRtcPhase.connected &&
@@ -437,6 +504,37 @@ class _LiveHostPageState extends State<LiveHostPage> {
     _aiAssistEnabled = false;
     _aiVisionVerificationMode = false;
     _aiAssist.stop();
+  }
+
+  void _clearFieldTestModeState() {
+    _fieldTestModeActive = false;
+    _lastFieldTestSummary = null;
+  }
+
+  void _startFieldTestMode() {
+    final gate = _fieldTestModeStartGate;
+    if (!gate.canStart) {
+      setState(() => _errorMessage = gate.statusLabel);
+      return;
+    }
+
+    setState(() {
+      _fieldTestModeActive = true;
+      _lastFieldTestSummary = null;
+      _errorMessage = null;
+    });
+  }
+
+  void _endFieldTestMode() {
+    setState(() {
+      _fieldTestModeActive = false;
+      _lastFieldTestSummary = _fieldTestModeSnapshot.toSummary();
+      _errorMessage = null;
+    });
+  }
+
+  void _dismissFieldTestSummary() {
+    setState(() => _lastFieldTestSummary = null);
   }
 
   Future<void> _createChannel() async {
@@ -2202,6 +2300,241 @@ class _FieldTestStatusPanel extends StatelessWidget {
       _FieldTestStatusState.warning => const Color(0xFFB45309),
       _FieldTestStatusState.blocked => colorScheme.error,
     };
+  }
+}
+
+class _FieldTestModePanel extends StatelessWidget {
+  const _FieldTestModePanel({
+    required this.gate,
+    required this.snapshot,
+    required this.active,
+    required this.lastSummary,
+    required this.onStart,
+    required this.onEnd,
+    required this.onDismissSummary,
+  });
+
+  final FieldTestModeStartGate gate;
+  final FieldTestModeSnapshot snapshot;
+  final bool active;
+  final FieldTestModeSummary? lastSummary;
+  final VoidCallback onStart;
+  final VoidCallback onEnd;
+  final VoidCallback onDismissSummary;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('현장 테스트 모드', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              '통제 경로 + 백업 동행자 기준으로만 실행합니다.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            if (active)
+              _ActiveFieldTestModeSummary(snapshot: snapshot, onEnd: onEnd)
+            else
+              _FieldTestModeStartArea(gate: gate, onStart: onStart),
+            if (!active && lastSummary != null) ...[
+              const SizedBox(height: 12),
+              _FieldTestModeSummaryView(
+                summary: lastSummary!,
+                onDismiss: onDismissSummary,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FieldTestModeStartArea extends StatelessWidget {
+  const _FieldTestModeStartArea({
+    required this.gate,
+    required this.onStart,
+  });
+
+  final FieldTestModeStartGate gate;
+  final VoidCallback onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Semantics(
+          liveRegion: true,
+          label: gate.statusLabel,
+          child: Text(
+            gate.statusLabel,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: gate.canStart
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(56),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onPressed: gate.canStart ? onStart : null,
+          icon: const Icon(Icons.play_circle),
+          label: const Text('현장 테스트 모드 시작'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActiveFieldTestModeSummary extends StatelessWidget {
+  const _ActiveFieldTestModeSummary({
+    required this.snapshot,
+    required this.onEnd,
+  });
+
+  final FieldTestModeSnapshot snapshot;
+  final VoidCallback onEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Semantics(
+      liveRegion: true,
+      label: snapshot.talkBackStatusLabel,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '현재 단계: ${snapshot.stageLabel}',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '다음 조작',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+          ),
+          Text(
+            snapshot.nextActionTitle,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(snapshot.nextActionDetail),
+          const SizedBox(height: 12),
+          _FieldTestModeStatusLine(
+            label: '가이드 흐름',
+            value: snapshot.guideFlowState.statusLabel,
+          ),
+          _FieldTestModeStatusLine(
+            label: 'AI 보조',
+            value: snapshot.aiAssistStatusLabel,
+          ),
+          _FieldTestModeStatusLine(
+            label: 'WebRTC',
+            value: snapshot.webRtcStatusLabel,
+          ),
+          if (snapshot.requiresResumeConfirmation)
+            const _FieldTestModeStatusLine(label: '재개 확인', value: '필요'),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(56),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onPressed: onEnd,
+            icon: const Icon(Icons.stop_circle),
+            label: const Text('현장 테스트 모드 종료'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FieldTestModeSummaryView extends StatelessWidget {
+  const _FieldTestModeSummaryView({
+    required this.summary,
+    required this.onDismiss,
+  });
+
+  final FieldTestModeSummary summary;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('테스트 요약', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Text(
+          '화면에만 표시하며 참여 링크, 세션 코드, 채팅 원문, 카메라 원본, 위치 정보는 포함하지 않습니다.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 8),
+        for (final row in summary.rows) ...[
+          _FieldTestModeStatusLine(label: row.label, value: row.value),
+          const SizedBox(height: 4),
+        ],
+        const SizedBox(height: 8),
+        TextButton(onPressed: onDismiss, child: const Text('요약 닫기')),
+      ],
+    );
+  }
+}
+
+class _FieldTestModeStatusLine extends StatelessWidget {
+  const _FieldTestModeStatusLine({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 96,
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ),
+        Expanded(child: Text(value)),
+      ],
+    );
   }
 }
 
