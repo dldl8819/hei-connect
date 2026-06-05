@@ -245,6 +245,8 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           requiresResumeConfirmation:
                               _requiresResumeConfirmation,
                           webRtcPhase: _webRtc.phase,
+                          fieldErrorMessage:
+                              _errorMessage ?? _webRtc.errorMessage,
                           guideFlowConfirmed: _guideFlowConfirmed,
                           onGuideFlowConfirmedChanged: _setGuideFlowConfirmed,
                           aiAssistEnabled: _aiAssistEnabled,
@@ -1399,6 +1401,22 @@ class _FieldTestStageItem {
   final _FieldTestStatusState state;
 }
 
+class _FieldTestFailureGuide {
+  const _FieldTestFailureGuide({
+    required this.title,
+    required this.detail,
+    required this.icon,
+    required this.state,
+    required this.actions,
+  });
+
+  final String title;
+  final String detail;
+  final IconData icon;
+  final _FieldTestStatusState state;
+  final List<String> actions;
+}
+
 class _FieldTestNextAction {
   const _FieldTestNextAction({
     required this.title,
@@ -1425,6 +1443,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
     required this.preRunChecklistComplete,
     required this.requiresResumeConfirmation,
     required this.webRtcPhase,
+    required this.fieldErrorMessage,
     required this.guideFlowConfirmed,
     required this.onGuideFlowConfirmedChanged,
     required this.aiAssistEnabled,
@@ -1445,6 +1464,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
   final bool preRunChecklistComplete;
   final bool requiresResumeConfirmation;
   final WebRtcPhase webRtcPhase;
+  final String? fieldErrorMessage;
   final bool guideFlowConfirmed;
   final ValueChanged<bool> onGuideFlowConfirmedChanged;
   final bool aiAssistEnabled;
@@ -1516,6 +1536,7 @@ class _FieldTestStatusPanel extends StatelessWidget {
       ),
     ];
     final nextAction = _nextAction;
+    final failureGuide = _failureGuide;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1609,6 +1630,15 @@ class _FieldTestStatusPanel extends StatelessWidget {
                 ),
               ),
             ),
+            if (failureGuide != null) ...[
+              const SizedBox(height: 12),
+              Text('문제 대응', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              _FieldTestFailureGuidePanel(
+                guide: failureGuide,
+                color: _stateColor(context, failureGuide.state),
+              ),
+            ],
             const SizedBox(height: 8),
             Text(
               '상태는 화면에만 표시하며 원본 카메라, 채팅 원문, 개인 정보는 저장하지 않습니다.',
@@ -1987,6 +2017,146 @@ class _FieldTestStatusPanel extends StatelessWidget {
     );
   }
 
+  _FieldTestFailureGuide? get _failureGuide {
+    if (requiresResumeConfirmation) {
+      return const _FieldTestFailureGuide(
+        title: '정지 후 재개 확인 필요',
+        detail: '연결 끊김 또는 정지 큐 이후에는 자동으로 계속하지 않습니다.',
+        icon: Icons.pause_circle,
+        state: _FieldTestStatusState.blocked,
+        actions: [
+          '러너 이동을 먼저 멈춥니다.',
+          '백업 동행자가 가까이 있는지 확인합니다.',
+          '카메라와 오디오가 안정적일 때만 안전 확인 후 재개합니다.',
+          '재개 후 가이드 음성/정지 흐름을 다시 확인합니다.',
+        ],
+      );
+    }
+
+    final normalizedError = fieldErrorMessage?.toLowerCase();
+    if (normalizedError != null) {
+      if (normalizedError.contains('권한')) {
+        return const _FieldTestFailureGuide(
+          title: '권한 확인 필요',
+          detail: '카메라 또는 마이크 권한을 사용할 수 없습니다.',
+          icon: Icons.lock,
+          state: _FieldTestStatusState.blocked,
+          actions: [
+            '러너를 정지 상태로 유지합니다.',
+            'Android 앱 설정에서 카메라와 마이크 권한만 허용합니다.',
+            '앱을 다시 열고 안전 체크부터 반복합니다.',
+            '리포트에는 권한 거부 여부만 기록합니다.',
+          ],
+        );
+      }
+      if (normalizedError.contains('카메라') || normalizedError.contains('프레임')) {
+        return const _FieldTestFailureGuide(
+          title: '카메라 확인 필요',
+          detail: '눈앞 카메라 preview 또는 AI 분석 프레임을 사용할 수 없습니다.',
+          icon: Icons.videocam_off,
+          state: _FieldTestStatusState.warning,
+          actions: [
+            '러너를 정지 상태로 유지합니다.',
+            '방송 소스가 눈앞 카메라인지 확인합니다.',
+            '다른 앱이 카메라를 사용 중인지 확인합니다.',
+            'preview가 보인 뒤 카메라 각도를 다시 확인합니다.',
+          ],
+        );
+      }
+      if (normalizedError.contains('마이크') || normalizedError.contains('오디오')) {
+        return const _FieldTestFailureGuide(
+          title: '마이크 또는 오디오 확인 필요',
+          detail: '가이드 음성 또는 마이크 시작 상태를 확인해야 합니다.',
+          icon: Icons.mic_off,
+          state: _FieldTestStatusState.warning,
+          actions: [
+            '러너를 정지 상태로 유지합니다.',
+            '마이크 권한과 오디오 입력을 확인합니다.',
+            '오픈이어, 한쪽 이어폰, 또는 스피커 출력으로 주변 소리를 유지합니다.',
+            '가이드 음성이 들리기 전에는 가이드 흐름 확인을 체크하지 않습니다.',
+          ],
+        );
+      }
+      if (normalizedError.contains('ai') || normalizedError.contains('분석')) {
+        return const _FieldTestFailureGuide(
+          title: 'AI 분석 확인 필요',
+          detail: 'AI 보조는 실제 카메라 분석 전에 다시 확인해야 합니다.',
+          icon: Icons.visibility_off,
+          state: _FieldTestStatusState.warning,
+          actions: [
+            '러너를 정지 상태로 유지합니다.',
+            '검증 모드가 꺼져 있는지 확인합니다.',
+            '눈앞 카메라 preview와 각도를 확인합니다.',
+            '지금 분석은 통제된 테스트 물체로만 실행합니다.',
+          ],
+        );
+      }
+    }
+
+    if (webRtcPhase == WebRtcPhase.connectionLost ||
+        webRtcPhase == WebRtcPhase.failed) {
+      return const _FieldTestFailureGuide(
+        title: 'WebRTC 연결 확인 필요',
+        detail: '영상 또는 음성 연결이 안정적이지 않습니다.',
+        icon: Icons.wifi_off,
+        state: _FieldTestStatusState.blocked,
+        actions: [
+          '러너 이동을 먼저 멈춥니다.',
+          '가이드가 현재 세션에 참여했는지 확인합니다.',
+          '신호 새로고침을 누릅니다.',
+          '계속 실패하면 세션을 새로 만들고 처음부터 확인합니다.',
+        ],
+      );
+    }
+
+    if (isLive && webRtcPhase == WebRtcPhase.waitingForAnswer) {
+      return const _FieldTestFailureGuide(
+        title: '가이드 연결 대기',
+        detail: '가이드 기기와 WebRTC 연결이 아직 완료되지 않았습니다.',
+        icon: Icons.sync,
+        state: _FieldTestStatusState.warning,
+        actions: [
+          '러너를 정지 상태로 유지합니다.',
+          '가이드가 현재 세션에 참여했는지 확인합니다.',
+          '필요하면 신호 새로고침을 누릅니다.',
+          '연결됨 상태 전에는 가이드 흐름 확인을 체크하지 않습니다.',
+        ],
+      );
+    }
+
+    if (isLive && webRtcPhase == WebRtcPhase.connected && !guideFlowConfirmed) {
+      return const _FieldTestFailureGuide(
+        title: '가이드 흐름 확인 필요',
+        detail: 'AI 보조 전에 가이드 음성, 큐, 짧은 채팅 TTS, 정지/재개를 확인합니다.',
+        icon: Icons.record_voice_over,
+        state: _FieldTestStatusState.pending,
+        actions: [
+          '가이드 음성이 러너에게 들리는지 확인합니다.',
+          '큐 버튼과 짧은 채팅 TTS를 확인합니다.',
+          '정지 큐 후 안전 확인 재개가 필요한지 확인합니다.',
+          '모두 확인된 뒤 가이드 흐름 확인을 체크합니다.',
+        ],
+      );
+    }
+
+    if (aiAssistEnabled && aiVerificationMode && verificationDecision == null) {
+      return const _FieldTestFailureGuide(
+        title: 'AI 검증 모드 대기',
+        detail: '검증 모드는 카메라 분석 없이 안내 흐름만 확인합니다.',
+        icon: Icons.science,
+        state: _FieldTestStatusState.warning,
+        actions: [
+          '러너를 정지 상태로 유지합니다.',
+          '감속 큐 테스트를 먼저 누릅니다.',
+          '정지 큐 테스트 후 재개 확인이 필요한지 확인합니다.',
+          '검증 실패 시 실제 AI 분석을 진행하지 않습니다.',
+        ],
+      );
+    }
+
+    return null;
+  }
+
   Color _stateColor(BuildContext context, _FieldTestStatusState state) {
     final colorScheme = Theme.of(context).colorScheme;
     return switch (state) {
@@ -2048,6 +2218,71 @@ class _FieldTestStatusRow extends StatelessWidget {
       _FieldTestStatusState.warning => const Color(0xFFB45309),
       _FieldTestStatusState.blocked => colorScheme.error,
     };
+  }
+}
+
+class _FieldTestFailureGuidePanel extends StatelessWidget {
+  const _FieldTestFailureGuidePanel({
+    required this.guide,
+    required this.color,
+  });
+
+  final _FieldTestFailureGuide guide;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(guide.icon, color: color, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        guide.title,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: color,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(guide.detail),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            for (final action in guide.actions)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.arrow_right, color: color, size: 18),
+                    const SizedBox(width: 4),
+                    Expanded(child: Text(action)),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

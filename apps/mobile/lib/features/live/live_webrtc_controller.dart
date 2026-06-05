@@ -458,10 +458,35 @@ class LiveWebRtcController extends ChangeNotifier {
   }
 
   Future<void> _fail(Object error) async {
-    errorMessage =
-        error is LiveWebRtcException ? error.message : 'WebRTC 연결을 시작하지 못했습니다.';
+    errorMessage = _safeStartErrorMessage(error);
     await _resetPeerConnection();
     _setPhase(WebRtcPhase.failed);
+  }
+
+  String _safeStartErrorMessage(Object error) {
+    if (error is LiveWebRtcException) {
+      return error.message;
+    }
+
+    final normalized = error.toString().toLowerCase();
+    if (normalized.contains('permission') ||
+        normalized.contains('denied') ||
+        normalized.contains('notallowed')) {
+      return '카메라 또는 마이크 권한을 사용할 수 없습니다. 권한을 확인하고 정지 상태에서 다시 시작해 주세요.';
+    }
+    if (normalized.contains('camera') ||
+        normalized.contains('video') ||
+        normalized.contains('notfound')) {
+      return '카메라를 시작하지 못했습니다. 다른 앱 사용 여부와 눈앞 카메라 설정을 확인해 주세요.';
+    }
+    if (normalized.contains('microphone') || normalized.contains('audio')) {
+      return '마이크를 시작하지 못했습니다. 마이크 권한과 오디오 입력을 확인해 주세요.';
+    }
+    if (normalized.contains('display') || normalized.contains('screen')) {
+      return '화면 공유를 시작하지 못했습니다. 화면 공유 권한과 소스 선택을 확인해 주세요.';
+    }
+
+    return 'WebRTC 연결을 시작하지 못했습니다. 정지 상태에서 권한, 카메라, 마이크를 확인해 주세요.';
   }
 
   void _handleSignalFailure(String message) {
