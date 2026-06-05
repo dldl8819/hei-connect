@@ -16,6 +16,8 @@ import 'live_session_api.dart';
 import 'live_models.dart';
 import 'live_signaling_models.dart';
 import 'live_webrtc_controller.dart';
+import 'test_session_report.dart';
+import 'test_session_report_view.dart';
 
 class LiveHostPage extends StatefulWidget {
   const LiveHostPage({super.key});
@@ -296,6 +298,7 @@ class _LiveHostPageState extends State<LiveHostPage> {
                           gate: _fieldTestModeStartGate,
                           snapshot: _fieldTestModeSnapshot,
                           testOrderState: _fieldTestDeviceTestOrderState,
+                          report: _fieldTestSessionReport,
                           active: _fieldTestModeActive,
                           lastSummary: _lastFieldTestSummary,
                           memo: _fieldTestResultMemo,
@@ -493,6 +496,22 @@ class _LiveHostPageState extends State<LiveHostPage> {
       actualResult: _fieldTestActualResultController.text,
       reproductionSteps: _fieldTestReproductionStepsController.text,
       sensitiveInfoRemoved: _fieldTestSensitiveInfoRemoved,
+    );
+  }
+
+  TestSessionReport get _fieldTestSessionReport {
+    return TestSessionReport(
+      role: TestSessionReportRole.runner,
+      webRtcConnected: _webRtc.phase == WebRtcPhase.connected,
+      guideFlowConfirmedCount: _guideFlowState.confirmedCount,
+      guideFlowTotalCount: _guideFlowState.totalCount,
+      aiVerificationChecked: _lastAiVerificationDecision != null,
+      actualAiAnalysisChecked:
+          !_aiVisionVerificationMode && _aiAssist.lastDecision != null,
+      stopResumeConfirmed:
+          _guideFlowState.contains(GuideFlowChecklistItem.stopResume) &&
+              !_requiresResumeConfirmation,
+      memo: _fieldTestResultMemo,
     );
   }
 
@@ -2386,6 +2405,7 @@ class _FieldTestModePanel extends StatelessWidget {
     required this.gate,
     required this.snapshot,
     required this.testOrderState,
+    required this.report,
     required this.active,
     required this.lastSummary,
     required this.memo,
@@ -2404,6 +2424,7 @@ class _FieldTestModePanel extends StatelessWidget {
   final FieldTestModeStartGate gate;
   final FieldTestModeSnapshot snapshot;
   final FieldTestDeviceTestOrderState testOrderState;
+  final TestSessionReport report;
   final bool active;
   final FieldTestModeSummary? lastSummary;
   final FieldTestResultMemo memo;
@@ -2449,6 +2470,7 @@ class _FieldTestModePanel extends StatelessWidget {
               _FieldTestModeSummaryView(
                 summary: lastSummary!,
                 memo: memo,
+                report: report,
                 failureStepController: failureStepController,
                 expectedResultController: expectedResultController,
                 actualResultController: actualResultController,
@@ -2725,6 +2747,7 @@ class _FieldTestModeSummaryView extends StatelessWidget {
   const _FieldTestModeSummaryView({
     required this.summary,
     required this.memo,
+    required this.report,
     required this.failureStepController,
     required this.expectedResultController,
     required this.actualResultController,
@@ -2737,6 +2760,7 @@ class _FieldTestModeSummaryView extends StatelessWidget {
 
   final FieldTestModeSummary summary;
   final FieldTestResultMemo memo;
+  final TestSessionReport report;
   final TextEditingController failureStepController;
   final TextEditingController expectedResultController;
   final TextEditingController actualResultController;
@@ -2838,6 +2862,8 @@ class _FieldTestModeSummaryView extends StatelessWidget {
                 ),
           ),
         ],
+        const SizedBox(height: 8),
+        TestSessionReportView(report: report),
         const SizedBox(height: 8),
         TextButton(onPressed: onDismiss, child: const Text('요약 닫기')),
       ],

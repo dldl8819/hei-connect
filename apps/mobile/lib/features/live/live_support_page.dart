@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/safety/screen_awake.dart';
 import '../../core/safety/voice_cues.dart';
+import 'field_test_mode.dart';
 import 'guide_flow_accessibility_widgets.dart';
 import 'guide_flow_checklist.dart';
 import 'live_invite_parser.dart';
@@ -14,6 +15,8 @@ import 'live_session_api.dart';
 import 'live_signaling_models.dart';
 import 'live_webrtc_controller.dart';
 import 'support_guide_flow.dart';
+import 'test_session_report.dart';
+import 'test_session_report_view.dart';
 
 class LiveSupportPage extends StatefulWidget {
   const LiveSupportPage({super.key, this.initialInvite});
@@ -114,6 +117,7 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
                   return _SupportGuideControlPanel(
                     flowState: _supportGuideFlowState,
                     guideFlowState: _guideFlowState,
+                    report: _supportTestSessionReport,
                     isSendingCue: _isSendingCue,
                     selectedCue: _selectedCue,
                     onCueSelected: (cue) => unawaited(_sendCue(cue)),
@@ -443,6 +447,21 @@ class _LiveSupportPageState extends State<LiveSupportPage> {
     );
   }
 
+  TestSessionReport get _supportTestSessionReport {
+    return TestSessionReport(
+      role: TestSessionReportRole.guide,
+      webRtcConnected: _webRtc.phase == WebRtcPhase.connected,
+      guideFlowConfirmedCount: _guideFlowState.confirmedCount,
+      guideFlowTotalCount: _guideFlowState.totalCount,
+      aiVerificationChecked: false,
+      actualAiAnalysisChecked: false,
+      stopResumeConfirmed:
+          _guideFlowState.contains(GuideFlowChecklistItem.stopResume) &&
+              _lastStopCueSequence <= _lastResumeConfirmedCueSequence,
+      memo: FieldTestResultMemo.fromInput(),
+    );
+  }
+
   void _setGuideFlowChecklistItem(
     GuideFlowChecklistItem item,
     bool checked,
@@ -536,6 +555,7 @@ class _SupportGuideControlPanel extends StatelessWidget {
   const _SupportGuideControlPanel({
     required this.flowState,
     required this.guideFlowState,
+    required this.report,
     required this.isSendingCue,
     required this.selectedCue,
     required this.onCueSelected,
@@ -545,6 +565,7 @@ class _SupportGuideControlPanel extends StatelessWidget {
 
   final SupportGuideFlowState flowState;
   final GuideFlowChecklistState guideFlowState;
+  final TestSessionReport report;
   final bool isSendingCue;
   final VoiceCue selectedCue;
   final ValueChanged<VoiceCue> onCueSelected;
@@ -628,6 +649,8 @@ class _SupportGuideControlPanel extends StatelessWidget {
               enabled: flowState.canCheckGuideFlow,
               onItemChanged: onGuideFlowChecklistItemChanged,
             ),
+            const SizedBox(height: 12),
+            TestSessionReportView(report: report),
           ],
         ),
       ),
