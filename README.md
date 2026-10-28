@@ -94,3 +94,10 @@ Use `.env.example` as a template and keep real environment files out of Git.
 Never commit credentials, tokens, private URLs, or personally identifying data.
 Set `CONNECT_PUBLIC_APP_URL` at runtime to generate shareable channel and live
 session links.
+
+## License
+
+No open-source license has been chosen for this project's own code yet, so all
+rights are reserved until one is added. The plugin overrides under
+`third_party/` keep their upstream licenses; see each directory's `LICENSE` and
+`NOTICE`, and `third_party/README.md` for what was changed.
