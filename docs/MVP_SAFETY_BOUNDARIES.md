@@ -65,3 +65,8 @@ Before any external pilot, the team must confirm:
 - Privacy notice and consent text for live camera, microphone, and chat.
 - Abuse handling for unexpected viewers, harmful chat, and unsafe guidance.
 - Incident response process for stops, connection loss, or injury reports.
+- Open-source license notices in the app for every bundled dependency. Flutter's
+  license page collects Dart package licenses only, so native libraries the
+  build downloads (for example `io.github.webrtc-sdk:android`, `audioswitch`
+  and the ML Kit SDK on Android, and the matching CocoaPods on iOS) need their
+  notices added separately.
